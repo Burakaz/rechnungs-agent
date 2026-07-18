@@ -616,7 +616,10 @@ function seedHashes() {
 // 'has:attachment filename:pdf after:2026/6/10 before:2026/7/2 …').
 // Bei Nachhol-Läufen wird NIE an Qonto weitergeleitet – alte offene
 // Rechnungen sind in der Regel längst bezahlt.
-function processInvoices(queryOverride) {
+// ignoreProcessed: true = bereits als "verarbeitet" markierte Mails erneut
+// prüfen (Reparatur-Läufe, z. B. nach einem Filter-Bugfix). Hash-Dedupe
+// verhindert dabei Doppelablagen.
+function processInvoices(queryOverride, ignoreProcessed) {
   const labelDone = getOrCreateLabel(CONFIG.LABEL_DONE);
   const labelReview = getOrCreateLabel(CONFIG.LABEL_REVIEW);
   const processedIds = loadProcessedIds();
@@ -641,10 +644,12 @@ function processInvoices(queryOverride) {
       if (Date.now() - startTime > MAX_RUNTIME_MS) break outer;
 
       const msgId = message.getId();
-      if (processedIds.has(msgId)) continue;
+      if (!ignoreProcessed && processedIds.has(msgId)) continue;
 
+      // Manche Versender (z. B. flaschenpost via Mailjet) deklarieren PDFs als
+      // application/octet-stream → Dateiname .pdf zählt genauso.
       const pdfs = message.getAttachments({ includeInlineImages: false })
-        .filter(a => a.getContentType() === 'application/pdf');
+        .filter(a => a.getContentType() === 'application/pdf' || /\.pdf$/i.test(a.getName()));
       if (pdfs.length === 0) { processedIds.add(msgId); continue; }
 
       const result = classifyMessage(message, pdfs[0]);
