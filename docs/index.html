@@ -592,7 +592,7 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
       <div class="section-head">
         <p class="label">Kompatibilität</p>
         <h2>Welche Banken funktionieren?</h2>
-        <p>Qonto ist die Zentrale — aber dank Konto-Aggregation längst nicht die einzige Bank, die der Agent sieht.</p>
+        <p>Praktisch jede: Qonto ist nativ integriert, alles Weitere kommt per Qonto-Konto-Aggregation dazu — oder ganz ohne Qonto über den eingebauten GoCardless-Adapter.</p>
       </div>
       <div class="cards cards-3">
 
@@ -608,9 +608,19 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
         </article>
 
         <article class="card">
-          <div class="card-top"><h3>Ohne Qonto</h3><span class="badge opt">Roadmap</span></div>
-          <p>Ein Adapter für <b>GoCardless Bank Account Data</b> (kostenlose PSD2-Schnittstelle für über 2.000 europäische Banken) ist angedacht.</p>
-          <p>Die Qonto-Zugriffe sind im Code bewusst in zwei kleinen Funktionen gekapselt (<code class="fn">qontoAccounts_</code>, <code class="fn">qontoTransactions_</code>) — Contributions willkommen.</p>
+          <div class="card-top"><h3>Ohne Qonto: GoCardless</h3><span class="badge">Eingebaut</span></div>
+          <p>Der Agent bindet über <b>GoCardless Bank Account Data</b> (kostenlose PSD2-Schnittstelle, 2.000+ europäische Banken — Sparkasse, Volksbank, DKB, Commerzbank, N26, Finom, Holvi&nbsp;…) beliebige Firmenkonten direkt ein — ganz ohne Qonto, oder zusätzlich dazu.</p>
+          <p>Gematchte Belege bekommen das Suffix <code class="fn">_Bank-&lt;Kontoname&gt;</code>.</p>
+        </article>
+
+        <article class="card card-wide">
+          <h3>GoCardless in 3 Schritten einrichten</h3>
+          <ul>
+            <li><b>1. Secret anlegen:</b> Kostenlosen Account auf <b>bankaccountdata.gocardless.com</b> erstellen, unter Developers → User secrets ein Secret anlegen und <code class="fn">GOCARDLESS_SECRET_ID</code> / <code class="fn">GOCARDLESS_SECRET_KEY</code> in die CONFIG eintragen.</li>
+            <li><b>2. Bank finden:</b> Im Apps-Script-Editor <code class="fn">gocardlessBankSuchen('sparkasse')</code> ausführen — die Institution-IDs stehen im Log.</li>
+            <li><b>3. Konto verbinden:</b> <code class="fn">gocardlessVerbinden('INSTITUTION_ID')</code> ausführen und den Link aus dem Log/Slack öffnen — einmal bei der Bank anmelden. Der Zugriff gilt bis zu 180 Tage, danach einfach neu verbinden.</li>
+          </ul>
+          <p style="margin:14px 0 0">Ab dann laufen die Konten automatisch im täglichen Beleg-Check und Monatsreport mit. Zwei Dinge solltest du wissen: GoCardless-Konten haben <b>keine Beleg-Anhänge</b> wie Qonto — der Beleg-Status kommt dort komplett aus dem Drive-Abgleich (Betrag + Datum im Dateinamen) und der Dauerbeleg-Liste. Und das Free-Tier erlaubt <b>4 Abrufe pro Konto und Tag</b> — der tägliche Check (1×) und der Monatsreport (1×) passen locker rein, häufige manuelle Testläufe können das Tageslimit aber aufbrauchen.</p>
         </article>
 
       </div>
@@ -674,7 +684,7 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
         </div>
         <div class="panel panel-wide">
           <h3>Der Konto-Tag: entsteht erst beim Abgleich</h3>
-          <p style="margin:0;font-size:.95rem;color:var(--muted)">Sobald der tägliche Beleg-Check ein PDF einer Abbuchung zuordnet, hängt der Agent das Zahlungskonto automatisch als Suffix an den Dateinamen: <code>_Qonto-&lt;Kontoname&gt;</code> bei Qonto-Konten, <code>_AMEX-&lt;Inhaber&gt;</code> bei Kreditkarten (der Name kommt aus dem <code>AMEX_KARTEN</code>-Mapping). Früher geht das nicht — beim Ablegen weiß noch niemand, von welchem Konto die Rechnung später abgebucht wird. Für Barbelege hängst du manuell <code>_Kasse</code> an; der Abgleich toleriert das Suffix.</p>
+          <p style="margin:0;font-size:.95rem;color:var(--muted)">Sobald der tägliche Beleg-Check ein PDF einer Abbuchung zuordnet, hängt der Agent das Zahlungskonto automatisch als Suffix an den Dateinamen: <code>_Qonto-&lt;Kontoname&gt;</code> bei Qonto-Konten, <code>_AMEX-&lt;Inhaber&gt;</code> bei Kreditkarten (der Name kommt aus dem <code>AMEX_KARTEN</code>-Mapping), <code>_Bank-&lt;Kontoname&gt;</code> bei GoCardless-Konten. Früher geht das nicht — beim Ablegen weiß noch niemand, von welchem Konto die Rechnung später abgebucht wird. Für Barbelege hängst du manuell <code>_Kasse</code> an; der Abgleich toleriert das Suffix.</p>
         </div>
       </div>
     </div>
@@ -768,7 +778,7 @@ benannt in Google Drive liegt.</pre>
           <summary>Was brauche ich mindestens?<span class="plus" aria-hidden="true">+</span></summary>
           <div class="answer">
             <p><b>Pflicht:</b> ein Google-Konto (Gmail/Workspace) und ein Drive-Ordner (<code>DRIVE_FOLDER_ID</code>).</p>
-            <p><b>Empfohlen:</b> ein Anthropic-API-Key für die KI-Benennung und ein Slack-Webhook für die Erinnerungen. <b>Für Beleg-Check und Monatsreport:</b> Qonto-API-Zugang und die BelegCheck-Spreadsheet-ID.</p>
+            <p><b>Empfohlen:</b> ein Anthropic-API-Key für die KI-Benennung und ein Slack-Webhook für die Erinnerungen. <b>Für Beleg-Check und Monatsreport:</b> Qonto-API-Zugang oder ein beliebiges Bankkonto via GoCardless — plus die BelegCheck-Spreadsheet-ID.</p>
             <p><b>Optional:</b> GetMyInvoices, lexoffice-API-Key, DATEV-Upload-Adressen. Jede Automatik startet nur, wenn ihr Key gesetzt ist — du kannst also mit der reinen Gmail-Ablage beginnen.</p>
           </div>
         </details>

@@ -29,7 +29,7 @@ Nach dem Abgleich:  2026-07-06_Musicbed_sub-1579529_99.99USD_AMEX-Max.pdf
 
 Das ist nicht nur Kosmetik — es ist die Grundlage für den **Beleg-Abgleich**, das Herzstück des Systems: Weil Betrag und Währung im Dateinamen stehen, kann der Agent jede Banktransaktion gegen die abgelegten PDFs matchen. EUR-Belege matchen bei exaktem Betrag ±10 Tage; Fremdwährungsbelege (USD-Rechnung vs. EUR-Abbuchung) matchen über den Anbieter-Namen im Dateinamen plus ein Wechselkurs-Band von 0,7–1,3. Jede Datei wird nur einmal „verbraucht" (1:1-Matching), damit ein Beleg nicht zwei Abbuchungen abdeckt.
 
-**Der Konto-Tag entsteht erst beim Abgleich:** Sobald der tägliche Beleg-Check ein PDF einer Abbuchung zuordnet, hängt der Agent das Zahlungskonto automatisch als Suffix an den Dateinamen — `_Qonto-<Kontoname>` bei Qonto-Konten, `_AMEX-<Inhaber>` bei Kreditkarten (der Name kommt aus dem `AMEX_KARTEN`-Mapping). Früher geht das nicht: Beim Ablegen weiß noch niemand, von welchem Konto die Rechnung später abgebucht wird. Für Barbelege kannst du manuell `_Kasse` anhängen — der Abgleich toleriert das Suffix. Das volle Format ist also `Datum_Anbieter_Nummer_Betrag[_Konto].pdf`.
+**Der Konto-Tag entsteht erst beim Abgleich:** Sobald der tägliche Beleg-Check ein PDF einer Abbuchung zuordnet, hängt der Agent das Zahlungskonto automatisch als Suffix an den Dateinamen — `_Qonto-<Kontoname>` bei Qonto-Konten, `_AMEX-<Inhaber>` bei Kreditkarten (der Name kommt aus dem `AMEX_KARTEN`-Mapping), `_Bank-<Kontoname>` bei GoCardless-Konten. Früher geht das nicht: Beim Ablegen weiß noch niemand, von welchem Konto die Rechnung später abgebucht wird. Für Barbelege kannst du manuell `_Kasse` anhängen — der Abgleich toleriert das Suffix. Das volle Format ist also `Datum_Anbieter_Nummer_Betrag[_Konto].pdf`.
 
 ### Erinnerungs-Logik
 
@@ -39,7 +39,7 @@ Die Slack-Erinnerungen sind bewusst zurückhaltend: frühestens 3 Tage nach der 
 
 - **Google-Konto bzw. Google Workspace** — Gmail, Drive und Apps Script (script.google.com). Mehr braucht die Kernfunktion nicht.
 - **Anthropic-API-Key** (empfohlen) — für die KI-Klassifizierung und saubere Benennung. Ohne Key arbeitet der Agent nur mit deinen Absenderlisten.
-- **Qonto-Geschäftskonto** (optional) — für den täglichen Beleg-Check und den Monatsreport. AMEX-Firmenkarten lassen sich in Qonto per Konto-Aggregation anbinden (siehe unten).
+- **Qonto-Geschäftskonto oder ein beliebiges Bankkonto via GoCardless** (optional) — für den täglichen Beleg-Check und den Monatsreport. AMEX-Firmenkarten lassen sich in Qonto per Konto-Aggregation anbinden; praktisch jede andere Bank bindet der eingebaute GoCardless-Adapter direkt an (siehe [Welche Banken funktionieren?](#welche-banken-funktionieren)).
 - **Slack** (optional, empfohlen) — für Benachrichtigungen und Erinnerungen. Ohne Slack-Webhook läuft der tägliche Beleg-Check nicht.
 - **GetMyInvoices** (optional) — für Portale, die keine Rechnungs-Mails verschicken.
 - **Lexware Office** (optional) — für die Ausgangsrechnungs-Ablage.
@@ -92,9 +92,11 @@ Alle Einstellungen stehen oben in `Code.gs` im `CONFIG`-Objekt.
 |------|----------|----------------|--------------------------|
 | `DRIVE_FOLDER_ID` | **Pflicht** | Ziel-Ordner für alle Belege | Ordner in Drive öffnen, ID aus der URL kopieren (`…/folders/<ID>`) |
 | `ANTHROPIC_API_KEY` | Empfohlen | KI-Klassifizierung (offen/bezahlt) und Extraktion von Anbieter, Nummer, Betrag, Datum für die Benennung. `''` = nur Absenderlisten, unbekannte Absender landen im Prüf-Label | [console.anthropic.com](https://console.anthropic.com) → API Keys |
-| `QONTO_API_LOGIN` | Pflicht für Beleg-Check + Report | Login der Qonto Business API = dein Organisations-Slug (kein Geheimnis) | Steht in Qonto bei den API-Einstellungen neben dem Schlüssel |
-| `QONTO_API_SECRET` | Pflicht für Beleg-Check + Report | Geheimer Schlüssel der Qonto-API. `''` = Beleg-Check und Monatsreport aus | Qonto → Einstellungen → Integrationen & Partner → API-Schlüssel |
+| `QONTO_API_LOGIN` | Pflicht für Beleg-Check + Report via Qonto | Login der Qonto Business API = dein Organisations-Slug (kein Geheimnis) | Steht in Qonto bei den API-Einstellungen neben dem Schlüssel |
+| `QONTO_API_SECRET` | Pflicht für Beleg-Check + Report via Qonto | Geheimer Schlüssel der Qonto-API. `''` = Beleg-Check und Monatsreport aus | Qonto → Einstellungen → Integrationen & Partner → API-Schlüssel |
 | `QONTO_FORWARD_ADDRESS` | Optional | Weiterleitungsadresse für offene Lieferantenrechnungen (`…@inbox.qonto.com`). `''` = offene Rechnungen werden nur markiert + gemeldet | Qonto → Lieferantenrechnungen → Weiterleitungsadresse |
+| `GOCARDLESS_SECRET_ID` | Optional | Bindet beliebige Bankkonten per GoCardless Bank Account Data in Beleg-Check + Monatsreport ein — ohne Qonto oder zusätzlich dazu. `''` = aus | [bankaccountdata.gocardless.com](https://bankaccountdata.gocardless.com) → Developers → User secrets |
+| `GOCARDLESS_SECRET_KEY` | Optional | Gehört zur Secret-ID oben — beide Werte kommen aus demselben User Secret | Wie oben |
 | `SLACK_WEBHOOK_URL` | Empfohlen (Pflicht für Beleg-Check) | Alle Benachrichtigungen und Erinnerungen. `''` = keine Meldungen, und der tägliche Beleg-Check läuft nicht | [api.slack.com/apps](https://api.slack.com/apps) → App erstellen → Incoming Webhooks aktivieren → Webhook für deinen Belege-Channel |
 | `GMI_API_KEY` | Optional | Stündlicher Abruf von Plattform-Rechnungen + GMI-Belegzuordnung als zweite Quelle im Monatsreport. `''` = aus | GetMyInvoices → Profilmenü oben rechts → API Zugriff → „+" |
 | `LEXOFFICE_API_KEY` | Optional | Stündlicher Abruf deiner Ausgangsrechnungen. `''` = aus | Lexware Office → Erweiterungen → Public API → Schlüssel erstellen |
@@ -138,8 +140,19 @@ Drei weitere Fallen, die dich sonst Stunden kosten:
 
 - **Qonto (nativ):** Direkt per API integriert — täglicher Beleg-Check, Monatsreport und die Weiterleitung offener Lieferantenrechnungen zur Zahlungsfreigabe.
 - **Finom, N26, Sparkasse, Volksbank, DKB, Commerzbank, weitere Karten … (über Qonto):** Alles, was du in Qonto per Konto-Aggregation verbindest, sieht der Agent automatisch mit — externe Konten laufen durch dieselbe Logik wie die AMEX-Karten (`is_external_account`). Ein Qonto-Konto als Zentrale genügt also, um praktisch jede in Deutschland übliche Bank einzubinden.
-- **Ohne Qonto (Roadmap):** Ein Adapter für GoCardless Bank Account Data (kostenlose PSD2-Schnittstelle für über 2.000 europäische Banken) ist angedacht — die Qonto-Zugriffe sind im Code bewusst in zwei kleinen Funktionen gekapselt (`qontoAccounts_`, `qontoTransactions_`), Contributions willkommen.
+- **Ohne Qonto: GoCardless (eingebaut):** Der Agent bindet über GoCardless Bank Account Data (kostenlose PSD2-Schnittstelle, 2.000+ europäische Banken — Sparkasse, Volksbank, DKB, Commerzbank, N26, Finom, Holvi …) beliebige Firmenkonten direkt ein — ganz ohne Qonto, oder zusätzlich dazu. Gematchte Belege bekommen das Suffix `_Bank-<Kontoname>`.
 - **Bargeld/Kasse:** Papierbelege scannst du in den Drive-Ordner und hängst manuell `_Kasse` an den Dateinamen — der Abgleich toleriert das Suffix.
+
+### So richtest du GoCardless ein
+
+1. Kostenlosen Account auf [bankaccountdata.gocardless.com](https://bankaccountdata.gocardless.com) anlegen, unter Developers → User secrets ein Secret erstellen und `GOCARDLESS_SECRET_ID`/`GOCARDLESS_SECRET_KEY` in die CONFIG eintragen.
+2. Im Apps-Script-Editor `gocardlessBankSuchen('sparkasse')` ausführen — die Institution-IDs stehen im Log.
+3. `gocardlessVerbinden('INSTITUTION_ID')` ausführen und den Link aus dem Log/Slack öffnen — einmal bei der Bank anmelden. Der Zugriff gilt bis zu 180 Tage, danach einfach neu verbinden.
+
+Ab dann laufen die Konten automatisch im täglichen Beleg-Check und Monatsreport mit. Zwei Dinge solltest du wissen:
+
+- **Keine Beleg-Anhänge:** GoCardless-Konten haben keine Anhänge wie Qonto — der Beleg-Status kommt dort komplett aus dem Drive-Abgleich (Betrag + Datum im Dateinamen) und der Dauerbeleg-Liste.
+- **Free-Tier-Limit:** 4 Abrufe pro Konto und Tag. Der tägliche Check (1×) und der Monatsreport (1×) passen locker rein — häufige manuelle Testläufe können das Tageslimit aber aufbrauchen.
 
 ## Dauerbelege
 

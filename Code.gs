@@ -36,6 +36,18 @@ const CONFIG = {
   // Key: Lexware Office → Erweiterungen → Public API → Schlüssel erstellen ('' = aus)
   LEXOFFICE_API_KEY: '',
 
+  // GoCardless Bank Account Data (kostenlos, PSD2) – bindet Konten fast aller
+  // europäischen Banken ein (Sparkasse, Volksbank, DKB, N26, Finom, Holvi …),
+  // falls du kein Qonto nutzt oder zusätzliche Konten hast. Einrichtung:
+  // 1. Kostenlosen Account auf bankaccountdata.gocardless.com anlegen,
+  //    unter Developers → User secrets ein Secret erstellen, beide Werte hier rein.
+  // 2. Im Editor gocardlessBankSuchen('sparkasse') ausführen → Institution-ID im Log.
+  // 3. gocardlessVerbinden('INSTITUTION_ID') ausführen → Link im Log/Slack öffnen
+  //    und einmal bei der Bank anmelden (Zugriff gilt bis zu 180 Tage).
+  // Danach laufen die verbundenen Konten automatisch im Beleg-Check + Monatsreport mit.
+  GOCARDLESS_SECRET_ID: '',
+  GOCARDLESS_SECRET_KEY: '',
+
   // BelegCheck-Spreadsheet der Buchhalterin – der Monatsreport ergänzt dort
   // automatisch die zwei Tabs (Qonto + Amex) für den Vormonat
   BELEGCHECK_SHEET_ID: 'DEINE_SPREADSHEET_ID',
@@ -126,7 +138,7 @@ function setup() {
   ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'checkMissingReceipts') ScriptApp.deleteTrigger(t);
   });
-  if (CONFIG.QONTO_API_SECRET) {
+  if (CONFIG.QONTO_API_SECRET || CONFIG.GOCARDLESS_SECRET_ID) {
     ScriptApp.newTrigger('checkMissingReceipts').timeBased().everyDays(1).atHour(9).create();
   }
   ScriptApp.getProjectTriggers().forEach(t => {
@@ -144,7 +156,7 @@ function setup() {
   ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'monthlyBelegReport') ScriptApp.deleteTrigger(t);
   });
-  if (CONFIG.QONTO_API_SECRET) {
+  if (CONFIG.QONTO_API_SECRET || CONFIG.GOCARDLESS_SECRET_ID) {
     ScriptApp.newTrigger('monthlyBelegReport').timeBased().onMonthDay(1).atHour(7).create();
   }
   seedHashes();
@@ -159,7 +171,7 @@ function setup() {
 // → Max) – frühestens 3 Tage nach der Abbuchung, max. 2×, mind. 3 Tage Abstand.
 // ---------------------------------------------------------------------------
 function checkMissingReceipts() {
-  if (!CONFIG.QONTO_API_SECRET || !CONFIG.SLACK_WEBHOOK_URL) return;
+  if ((!CONFIG.QONTO_API_SECRET && !CONFIG.GOCARDLESS_SECRET_ID) || !CONFIG.SLACK_WEBHOOK_URL) return;
   try {
     const now = new Date();
     const floorStr = CONFIG.BELEGPFLICHT_AB || '2026-07-01';
@@ -173,10 +185,9 @@ function checkMissingReceipts() {
     const reminders = JSON.parse(props.getProperty('belegReminders') || '{}');
     const missing = [], mentions = [];
 
-    qontoAccounts_().forEach(acc => {
+    alleBankKonten_().forEach(acc => {
       if (acc.status === 'closed') return;
-      const txs = qontoTransactions_(acc.id, from.toISOString(), now.toISOString(),
-        acc.is_external_account ? 'emitted_at' : 'settled_at');
+      const txs = kontoTransaktionen_(acc, from.toISOString(), now.toISOString());
       txs.forEach(t => {
         const betrag = (t.side === 'debit' ? -1 : 1) * (t.amount || 0);
         if (betrag >= 0 || t.operation_type === 'qonto_fee') return;
@@ -417,6 +428,144 @@ function pullLexofficeInvoices() {
       abgelegt.slice(0, 10).map(nm => '• ' + nm).join('\n') +
       (abgelegt.length > 10 ? '\n… und ' + (abgelegt.length - 10) + ' weitere' : ''));
   }
+}
+
+// ---------------------------------------------------------------------------
+// GoCardless Bank Account Data (ehem. Nordigen): kostenlose PSD2-Anbindung für
+// Konten fast aller europäischen Banken – als Alternative oder Ergänzung zu
+// Qonto. Transaktionen werden ins Qonto-Format normalisiert, damit Beleg-Check
+// und Monatsreport unverändert funktionieren. Free-Tier-Limit: 4 Abrufe pro
+// Konto und Tag – täglicher Check (1×) + Monatsreport (1×) passen locker.
+// ---------------------------------------------------------------------------
+const GC_BASE = 'https://bankaccountdata.gocardless.com/api/v2';
+
+function gcToken_() {
+  const resp = UrlFetchApp.fetch(GC_BASE + '/token/new/', {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify({ secret_id: CONFIG.GOCARDLESS_SECRET_ID,
+                              secret_key: CONFIG.GOCARDLESS_SECRET_KEY }),
+    muteHttpExceptions: true,
+  });
+  if (resp.getResponseCode() !== 200) throw new Error('GoCardless-Token: ' + resp.getContentText().slice(0, 200));
+  return JSON.parse(resp.getContentText()).access;
+}
+
+function gcFetch_(path, token) {
+  const resp = UrlFetchApp.fetch(GC_BASE + path, {
+    headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+    muteHttpExceptions: true,
+  });
+  if (resp.getResponseCode() !== 200) throw new Error('GoCardless ' + path + ': HTTP ' + resp.getResponseCode());
+  return JSON.parse(resp.getContentText());
+}
+
+// Schritt 1 der Einrichtung: Institutionen (Banken) suchen, IDs stehen im Log
+function gocardlessBankSuchen(suchbegriff) {
+  if (!CONFIG.GOCARDLESS_SECRET_ID) { console.error('Erst GOCARDLESS_SECRET_ID/KEY in CONFIG eintragen.'); return; }
+  if (!suchbegriff) { console.error("Aufruf: gocardlessBankSuchen('sparkasse')"); return; }
+  const token = gcToken_();
+  const alle = gcFetch_('/institutions/?country=de', token);
+  const treffer = alle.filter(i => i.name.toLowerCase().indexOf(String(suchbegriff).toLowerCase()) !== -1);
+  treffer.slice(0, 15).forEach(i => console.log(i.id + '  →  ' + i.name));
+  console.log(treffer.length + ' Treffer. Weiter mit gocardlessVerbinden(\'INSTITUTION_ID\')');
+}
+
+// Schritt 2: Bank verbinden – erzeugt den Anmelde-Link (im Log und in Slack)
+function gocardlessVerbinden(institutionId) {
+  if (!institutionId) { console.error("Aufruf: gocardlessVerbinden('SPARKASSE_XXX')"); return; }
+  const token = gcToken_();
+  const resp = UrlFetchApp.fetch(GC_BASE + '/requisitions/', {
+    method: 'post', contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + token },
+    payload: JSON.stringify({ redirect: 'https://bankaccountdata.gocardless.com/',
+                              institution_id: institutionId,
+                              reference: 'rechnungs-agent-' + Date.now() }),
+    muteHttpExceptions: true,
+  });
+  if (resp.getResponseCode() >= 300) { console.error('Requisition: ' + resp.getContentText().slice(0, 300)); return; }
+  const req = JSON.parse(resp.getContentText());
+  const props = PropertiesService.getScriptProperties();
+  const ids = JSON.parse(props.getProperty('gcRequisitions') || '[]');
+  ids.push(req.id);
+  props.setProperty('gcRequisitions', JSON.stringify(ids));
+  console.log('Öffne diesen Link und melde dich bei deiner Bank an:\n' + req.link);
+  notifySlack(':bank: GoCardless-Verbindung angelegt – bitte Bank-Login abschließen:\n' + req.link);
+}
+
+// Verbundene GoCardless-Konten, normalisiert auf das Qonto-Konto-Format.
+// Kontodetails werden gecacht (Details-Abrufe zählen gegen das Tageslimit).
+function gocardlessAccounts_() {
+  if (!CONFIG.GOCARDLESS_SECRET_ID || !CONFIG.GOCARDLESS_SECRET_KEY) return [];
+  const props = PropertiesService.getScriptProperties();
+  const reqIds = JSON.parse(props.getProperty('gcRequisitions') || '[]');
+  if (!reqIds.length) return [];
+  const cache = JSON.parse(props.getProperty('gcAccountCache') || '{}');
+  const konten = [];
+  try {
+    const token = gcToken_();
+    reqIds.forEach(rid => {
+      const req = gcFetch_('/requisitions/' + rid + '/', token);
+      if (req.status !== 'LN') return; // noch nicht verknüpft
+      (req.accounts || []).forEach(accId => {
+        if (!cache[accId]) {
+          const det = gcFetch_('/accounts/' + accId + '/details/', token).account || {};
+          cache[accId] = {
+            name: det.name || det.product || det.ownerName ||
+                  (req.institution_id || 'Bank').split('_')[0],
+            iban: det.iban || '',
+          };
+        }
+        konten.push({ id: accId, quelle: 'gocardless', status: 'active',
+          is_external_account: false,
+          name: cache[accId].name, iban: cache[accId].iban });
+      });
+    });
+    props.setProperty('gcAccountCache', JSON.stringify(cache));
+  } catch (e) {
+    console.warn('GoCardless-Konten: ' + e);
+  }
+  return konten;
+}
+
+// Transaktionen eines GoCardless-Kontos, normalisiert auf das Qonto-Format
+function gocardlessTransactions_(accId, fromIso, toIso) {
+  const token = gcToken_();
+  const data = gcFetch_('/accounts/' + accId + '/transactions/?date_from=' +
+    String(fromIso).slice(0, 10) + '&date_to=' + String(toIso).slice(0, 10), token);
+  return ((data.transactions || {}).booked || []).map(t => {
+    const amt = parseFloat((t.transactionAmount || {}).amount || '0');
+    return {
+      transaction_id: t.transactionId || t.internalTransactionId || '',
+      side: amt < 0 ? 'debit' : 'credit',
+      amount: Math.abs(amt),
+      currency: (t.transactionAmount || {}).currency || 'EUR',
+      settled_at: t.bookingDate ? t.bookingDate + 'T12:00:00Z' : null,
+      emitted_at: (t.valueDate || t.bookingDate || '') + 'T12:00:00Z',
+      label: t.creditorName || t.debtorName ||
+             (t.remittanceInformationUnstructured || '').slice(0, 60) || 'Buchung',
+      reference: t.remittanceInformationUnstructured ||
+                 (t.remittanceInformationUnstructuredArray || []).join(' ') || '',
+      attachment_ids: [], // GoCardless kennt keine Beleg-Anhänge
+      operation_type: 'transfer',
+    };
+  });
+}
+
+// Alle Bankkonten (Qonto und/oder GoCardless) für Beleg-Check + Monatsreport
+function alleBankKonten_() {
+  let konten = [];
+  if (CONFIG.QONTO_API_SECRET) {
+    konten = konten.concat(qontoAccounts_().map(a => { a.quelle = 'qonto'; return a; }));
+  }
+  konten = konten.concat(gocardlessAccounts_());
+  return konten;
+}
+
+// Transaktionen quellenunabhängig abrufen
+function kontoTransaktionen_(acc, fromIso, toIso) {
+  if (acc.quelle === 'gocardless') return gocardlessTransactions_(acc.id, fromIso, toIso);
+  return qontoTransactions_(acc.id, fromIso, toIso,
+    acc.is_external_account ? 'emitted_at' : 'settled_at');
 }
 
 // Dauerbeleg? (Leasing, Miete, Sozialabgaben, Gehälter … – siehe CONFIG)
@@ -786,7 +935,7 @@ function buildBelegReport(monthStart) {
   // Alle Konten aus der Qonto-API – inkl. der extern aggregierten AMEX-Karten.
   // Beleg-Status: Qonto-Konten = Anhang an der Transaktion; AMEX = Match gegen
   // GMI-Belegzuordnung (Betrag + Datum ±5 Tage), sonst offen.
-  const accounts = qontoAccounts_();
+  const accounts = alleBankKonten_();
   const gmiMap = gmiDocMap_(monthStart, monthEnd);
   const driveMap = driveDocMap_(monthStart);
   const qontoRows = [], amexRows = [];
@@ -794,8 +943,7 @@ function buildBelegReport(monthStart) {
   accounts.forEach(acc => {
     if (acc.status === 'closed') return;
     // Externe Konten haben kein settled_at → nach emitted_at filtern
-    const txs = qontoTransactions_(acc.id, fromIso, toIso,
-      acc.is_external_account ? 'emitted_at' : 'settled_at');
+    const txs = kontoTransaktionen_(acc, fromIso, toIso);
     const kartenName = (acc.name || 'AMEX') +
       (acc.is_external_account && acc.account_number ? ' …' + String(acc.account_number).slice(-5) : '');
     txs.forEach(t => {
@@ -958,7 +1106,7 @@ function driveDocMap_(monthStart) {
     const files = mIt.next().getFiles();
     while (files.hasNext()) {
       const f = files.next();
-      const m = f.getName().match(/^(\d{4}-\d{2}-\d{2})_(.+)_(\d+(?:\.\d+)?)([A-Za-z]{3})(?:_\d+)?(?:_(?:Qonto|AMEX|Kasse)[A-Za-z0-9ÄÖÜäöüß-]*)?\.pdf$/i);
+      const m = f.getName().match(/^(\d{4}-\d{2}-\d{2})_(.+)_(\d+(?:\.\d+)?)([A-Za-z]{3})(?:_\d+)?(?:_(?:Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*)?\.pdf$/i);
       if (!m) continue;
       entries.push({ time: new Date(m[1]).getTime(), vendor: m[2].toLowerCase(),
         amount: parseFloat(m[3]), cur: m[4].toUpperCase(), used: false, file: f });
@@ -993,7 +1141,7 @@ function driveHasDoc_(entries, amountAbs, dateMs, label, kontoTag) {
     if (kontoTag && best.e.file) {
       try {
         const nm = best.e.file.getName();
-        if (!/_(Qonto|AMEX|Kasse)[A-Za-z0-9ÄÖÜäöüß-]*\.pdf$/i.test(nm)) {
+        if (!/_(Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*\.pdf$/i.test(nm)) {
           best.e.file.setName(nm.replace(/\.pdf$/i, '_' + kontoTag + '.pdf'));
         }
       } catch (e) { /* Umbenennen darf den Abgleich nie blockieren */ }
@@ -1005,6 +1153,7 @@ function driveHasDoc_(entries, amountAbs, dateMs, label, kontoTag) {
 
 // Kürzel des Zahlungskontos für Dateinamen: Qonto-<Kontoname> bzw. AMEX-<Inhaber>
 function kontoTag_(acc) {
+  if (acc.quelle === 'gocardless') return 'Bank-' + sanitize(acc.name || 'Konto');
   if (acc.is_external_account) {
     const suffix = String(acc.account_number || '').slice(-5);
     const inhaber = (CONFIG.AMEX_KARTEN || {})[suffix];
