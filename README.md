@@ -21,12 +21,15 @@ Dazu kommt `backfillNames()` — eine einmalig ausführbare KI-Nachbenennung fü
 Jedes PDF wird nach diesem Muster benannt:
 
 ```
-YYYY-MM-DD_Anbieter_Rechnungsnummer_BetragWÄHRUNG.pdf
+YYYY-MM-DD_Anbieter_Rechnungsnummer_BetragWÄHRUNG[_Konto].pdf
 
-Beispiel: 2026-07-05_Notion_INV-2026-1234_25.50EUR.pdf
+Beispiel:           2026-07-05_Notion_INV-2026-1234_25.50EUR.pdf
+Nach dem Abgleich:  2026-07-06_Musicbed_sub-1579529_99.99USD_AMEX-Max.pdf
 ```
 
 Das ist nicht nur Kosmetik — es ist die Grundlage für den **Beleg-Abgleich**, das Herzstück des Systems: Weil Betrag und Währung im Dateinamen stehen, kann der Agent jede Banktransaktion gegen die abgelegten PDFs matchen. EUR-Belege matchen bei exaktem Betrag ±10 Tage; Fremdwährungsbelege (USD-Rechnung vs. EUR-Abbuchung) matchen über den Anbieter-Namen im Dateinamen plus ein Wechselkurs-Band von 0,7–1,3. Jede Datei wird nur einmal „verbraucht" (1:1-Matching), damit ein Beleg nicht zwei Abbuchungen abdeckt.
+
+**Der Konto-Tag entsteht erst beim Abgleich:** Sobald der tägliche Beleg-Check ein PDF einer Abbuchung zuordnet, hängt der Agent das Zahlungskonto automatisch als Suffix an den Dateinamen — `_Qonto-<Kontoname>` bei Qonto-Konten, `_AMEX-<Inhaber>` bei Kreditkarten (der Name kommt aus dem `AMEX_KARTEN`-Mapping). Früher geht das nicht: Beim Ablegen weiß noch niemand, von welchem Konto die Rechnung später abgebucht wird. Für Barbelege kannst du manuell `_Kasse` anhängen — der Abgleich toleriert das Suffix. Das volle Format ist also `Datum_Anbieter_Nummer_Betrag[_Konto].pdf`.
 
 ### Erinnerungs-Logik
 
@@ -53,6 +56,33 @@ Kein Server, kein Cronjob, kein Deployment — alles läuft in Google-Triggern.
 6. **Slack anbinden** (optional). Slack-App mit Incoming Webhook erstellen, Webhook-URL in die CONFIG, und die Slack-Member-IDs deiner Kollegen in `AMEX_KARTEN` bzw. `BELEG_ZUSTAENDIG` eintragen (Member-ID: Slack-Profil → „…" → „Mitglieder-ID kopieren").
 7. **Optionale Quellen anbinden.** GetMyInvoices-Key, Lexware-Office-Key und/oder DATEV-Upload-Adressen in die CONFIG — jeweils `setup()` erneut ausführen, damit die zugehörigen Trigger angelegt werden.
 8. **Weitere Postfächer** (optional). Installiere dieselbe Datei in zusätzlichen Postfächern (z. B. `billing@`) — über die geteilte Hash-Datei im Drive-Ordner entstehen keine Duplikate. Details im Abschnitt [Mehrpostfach-Betrieb](#mehrpostfach-betrieb).
+
+## Mit Claude Code einrichten
+
+Am schnellsten geht die Einrichtung mit [Claude Code](https://claude.com/claude-code) — kopiere diesen Prompt und Claude führt dich durch alles:
+
+```text
+Richte mir den „Rechnungs-Agent" ein: https://github.com/Burakaz/rechnungs-agent
+
+Lies zuerst das README des Repos komplett. Führe mich dann Schritt für Schritt
+durch die Einrichtung — immer nur ein Schritt, warte jeweils auf mein Okay:
+
+1. Google-Drive-Ordner für Belege anlegen (oder nimm meinen bestehenden) und
+   die Ordner-ID ermitteln.
+2. Auf script.google.com ein neues Apps-Script-Projekt anlegen und Code.gs +
+   appsscript.json aus dem Repo einfügen.
+3. Die CONFIG gemeinsam ausfüllen — erkläre mir zu jedem Feld, wo ich den Wert
+   herbekomme. Wichtig: API-Keys und Secrets trage ICH selbst ein.
+4. setup() ausführen und die Google-Freigaben bestätigen.
+5. Qonto: API-Schlüssel anlegen, meine Kreditkarten und Fremdbank-Konten per
+   Konto-Aggregation verbinden, dann per Testlauf prüfen, dass alle Konten
+   gefunden werden (externe Konten kommen über GET /v2/bank_accounts!).
+6. Optional einrichten, je nachdem was ich nutze: Slack-Webhook, GetMyInvoices,
+   lexoffice-Ausgangsrechnungen, DATEV Upload-Mail.
+
+Zum Schluss: Testlauf machen und mir zeigen, dass die erste Rechnung sauber
+benannt in Google Drive liegt.
+```
 
 ## CONFIG-Referenz
 
@@ -103,6 +133,13 @@ Drei weitere Fallen, die dich sonst Stunden kosten:
 - **Kein `settled_at` bei externen Konten.** Transaktionen der aggregierten AMEX-Karten haben oft kein `settled_at` — filtere stattdessen nach `emitted_at`. Der Code wählt das Datumsfeld automatisch je nach Konto-Typ.
 - **Die Zeitzonen-Falle.** AMEX bucht zur Berliner Mitternacht — das ist 22:00 UTC des **Vortags**. Wer stur nach UTC-Stichtagen filtert, verliert die Buchungen der Monatswechsel-Nacht. Die Lösung im Code: Das API-Abfragefenster bekommt 2 Tage Puffer, und die eigentliche Entscheidung (gehört die Buchung in den Monat?) fällt nach dem angezeigten lokalen Datum (`settled_at || emitted_at`, Zeitzone Europe/Berlin).
 - **Auth-Format.** Die Qonto-API will den Header `Authorization: login:secret` — Login ist der Organisations-Slug, das Secret kommt aus Einstellungen → Integrationen & Partner → API-Schlüssel. Kein Bearer, kein Base64.
+
+## Welche Banken funktionieren?
+
+- **Qonto (nativ):** Direkt per API integriert — täglicher Beleg-Check, Monatsreport und die Weiterleitung offener Lieferantenrechnungen zur Zahlungsfreigabe.
+- **Finom, N26, Sparkasse, Volksbank, DKB, Commerzbank, weitere Karten … (über Qonto):** Alles, was du in Qonto per Konto-Aggregation verbindest, sieht der Agent automatisch mit — externe Konten laufen durch dieselbe Logik wie die AMEX-Karten (`is_external_account`). Ein Qonto-Konto als Zentrale genügt also, um praktisch jede in Deutschland übliche Bank einzubinden.
+- **Ohne Qonto (Roadmap):** Ein Adapter für GoCardless Bank Account Data (kostenlose PSD2-Schnittstelle für über 2.000 europäische Banken) ist angedacht — die Qonto-Zugriffe sind im Code bewusst in zwei kleinen Funktionen gekapselt (`qontoAccounts_`, `qontoTransactions_`), Contributions willkommen.
+- **Bargeld/Kasse:** Papierbelege scannst du in den Drive-Ordner und hängst manuell `_Kasse` an den Dateinamen — der Abgleich toleriert das Suffix.
 
 ## Dauerbelege
 

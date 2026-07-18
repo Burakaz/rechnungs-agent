@@ -186,7 +186,7 @@ function checkMissingReceipts() {
         // Stichtag nach angezeigtem (Berliner) Datum – wie im BelegCheck-Sheet
         if (Utilities.formatDate(datum, 'Europe/Berlin', 'yyyy-MM-dd') < floorStr) return;
         const key = t.transaction_id || t.id;
-        if (driveHasDoc_(driveMap, Math.abs(betrag), datum.getTime(), t.label)) {
+        if (driveHasDoc_(driveMap, Math.abs(betrag), datum.getTime(), t.label, kontoTag_(acc))) {
           delete reminders[key];
           return;
         }
@@ -807,14 +807,14 @@ function buildBelegReport(monthStart) {
           (t.attachment_ids && t.attachment_ids.length > 0) ||
           istDauerbeleg_(t) ||
           gmiHasDoc_(gmiMap, Math.abs(betrag), new Date(datum).getTime()) ||
-          driveHasDoc_(driveMap, Math.abs(betrag), new Date(datum).getTime(), t.label);
+          driveHasDoc_(driveMap, Math.abs(betrag), new Date(datum).getTime(), t.label, kontoTag_(acc));
         amexRows.push([0, hasDoc, datumStr, t.label || '', t.reference || '',
           betrag, t.currency || 'EUR', kartenName]);
       } else {
         const hasDoc = (t.attachment_ids && t.attachment_ids.length > 0) ||
           betrag >= 0 || t.operation_type === 'qonto_fee' ||
           istDauerbeleg_(t) ||
-          driveHasDoc_(driveMap, Math.abs(betrag), new Date(datum).getTime(), t.label);
+          driveHasDoc_(driveMap, Math.abs(betrag), new Date(datum).getTime(), t.label, kontoTag_(acc));
         qontoRows.push([0, hasDoc, datumStr,
           Utilities.formatDate(new Date(t.emitted_at || datum), 'Europe/Berlin', 'dd.MM.yyyy'),
           t.label || '', t.operation_type || '', t.reference || '',
@@ -940,7 +940,9 @@ function gmiHasDoc_(map, amountAbs, dateMs) {
 // (Vormonat/Monat/Folgemonat) und matcht Transaktionen gegen abgelegte PDFs.
 // EUR-Belege: exakter Betrag + Datum ±10 Tage. Fremdwährung (z.B. USD):
 // Anbieter muss im Dateinamen stehen + Betrag ±30% (Wechselkurs) + Datum ±10 Tage.
-// Jede Datei wird höchstens einer Transaktion zugeordnet.
+// Jede Datei wird höchstens einer Transaktion zugeordnet. Beim Match wird das
+// Zahlungskonto als Suffix an den Dateinamen gehängt (_Qonto-<Konto> bzw.
+// _AMEX-<Inhaber>); ein manuelles _Kasse-Suffix wird ebenfalls toleriert.
 // ---------------------------------------------------------------------------
 function driveDocMap_(monthStart) {
   const entries = [];
@@ -956,16 +958,16 @@ function driveDocMap_(monthStart) {
     const files = mIt.next().getFiles();
     while (files.hasNext()) {
       const f = files.next();
-      const m = f.getName().match(/^(\d{4}-\d{2}-\d{2})_(.+)_(\d+(?:\.\d+)?)([A-Za-z]{3})(?:_\d+)?\.pdf$/i);
+      const m = f.getName().match(/^(\d{4}-\d{2}-\d{2})_(.+)_(\d+(?:\.\d+)?)([A-Za-z]{3})(?:_\d+)?(?:_(?:Qonto|AMEX|Kasse)[A-Za-z0-9ÄÖÜäöüß-]*)?\.pdf$/i);
       if (!m) continue;
       entries.push({ time: new Date(m[1]).getTime(), vendor: m[2].toLowerCase(),
-        amount: parseFloat(m[3]), cur: m[4].toUpperCase(), used: false });
+        amount: parseFloat(m[3]), cur: m[4].toUpperCase(), used: false, file: f });
     }
   });
   return entries;
 }
 
-function driveHasDoc_(entries, amountAbs, dateMs, label) {
+function driveHasDoc_(entries, amountAbs, dateMs, label, kontoTag) {
   const token = String(label || '').toLowerCase()
     .replace(/[^a-zäöü]+/g, ' ').split(' ').filter(w => w.length >= 4)[0] || '';
   const alias = { facebook: 'meta', celonis: 'make' }; // Celonis Inc. = make.com
@@ -985,8 +987,30 @@ function driveHasDoc_(entries, amountAbs, dateMs, label) {
     }
     if (ok && (!best || dd < best.dd)) best = { dd: dd, e: e };
   });
-  if (best) { best.e.used = true; return true; }
+  if (best) {
+    best.e.used = true;
+    // Zahlungskonto in den Dateinamen taggen (einmalig, best effort)
+    if (kontoTag && best.e.file) {
+      try {
+        const nm = best.e.file.getName();
+        if (!/_(Qonto|AMEX|Kasse)[A-Za-z0-9ÄÖÜäöüß-]*\.pdf$/i.test(nm)) {
+          best.e.file.setName(nm.replace(/\.pdf$/i, '_' + kontoTag + '.pdf'));
+        }
+      } catch (e) { /* Umbenennen darf den Abgleich nie blockieren */ }
+    }
+    return true;
+  }
   return false;
+}
+
+// Kürzel des Zahlungskontos für Dateinamen: Qonto-<Kontoname> bzw. AMEX-<Inhaber>
+function kontoTag_(acc) {
+  if (acc.is_external_account) {
+    const suffix = String(acc.account_number || '').slice(-5);
+    const inhaber = (CONFIG.AMEX_KARTEN || {})[suffix];
+    return 'AMEX-' + sanitize(inhaber ? inhaber.name : suffix);
+  }
+  return 'Qonto-' + sanitize(acc.name || 'Konto');
 }
 
 // ---------------------------------------------------------------------------

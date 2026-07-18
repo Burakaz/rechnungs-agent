@@ -261,6 +261,34 @@
     font-size:.8rem;border:1px solid var(--border);background:var(--cream);
     border-radius:999px;padding:5px 13px;color:var(--muted);
   }
+  .panel-wide{grid-column:1 / -1}
+  .panel code{
+    font-family:var(--mono);font-size:.85em;background:var(--cream);
+    border:1px solid var(--border);border-radius:5px;padding:1px 6px;
+  }
+
+  /* ---------- Banken ---------- */
+  @media (min-width:900px){.cards.cards-3{grid-template-columns:repeat(3,1fr)}}
+
+  /* ---------- Claude Code ---------- */
+  .prompt-box{margin-top:8px}
+  .prompt-head{
+    display:flex;align-items:center;justify-content:space-between;
+    gap:14px;margin-bottom:12px;
+  }
+  .prompt-title{
+    font-size:.7rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--muted);
+  }
+  .copy-btn{
+    display:inline-flex;align-items:center;gap:7px;
+    font-family:var(--sans);font-size:.82rem;font-weight:600;
+    background:transparent;color:var(--ink);
+    border:1px solid var(--ink);border-radius:999px;
+    padding:7px 16px;cursor:pointer;
+    transition:background .15s ease,color .15s ease;
+  }
+  .copy-btn:hover{background:var(--ink);color:var(--cream)}
 
   /* ---------- Setup ---------- */
   .steps{counter-reset:step;display:grid;gap:12px;margin:0;padding:0;list-style:none}
@@ -329,8 +357,10 @@
       <a href="#automatiken">Automatiken</a>
       <a href="#ablauf">Ablauf</a>
       <a href="#qonto-amex">Qonto&nbsp;+&nbsp;AMEX</a>
+      <a href="#banken">Banken</a>
       <a href="#naming">Dateinamen</a>
       <a href="#setup">Setup</a>
+      <a href="#claude-code">Claude&nbsp;Code</a>
       <a href="#faq">FAQ</a>
     </nav>
     <a class="nav-gh" href="https://github.com/Burakaz/rechnungs-agent">
@@ -556,24 +586,61 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
     </div>
   </section>
 
+  <!-- ============ BANKEN ============ -->
+  <section class="section" id="banken">
+    <div class="container">
+      <div class="section-head">
+        <p class="label">Kompatibilität</p>
+        <h2>Welche Banken funktionieren?</h2>
+        <p>Qonto ist die Zentrale — aber dank Konto-Aggregation längst nicht die einzige Bank, die der Agent sieht.</p>
+      </div>
+      <div class="cards cards-3">
+
+        <article class="card">
+          <div class="card-top"><h3>Qonto</h3><span class="badge">Nativ</span></div>
+          <p>Direkt per API integriert: der tägliche <b>Beleg-Check</b>, der <b>Monatsreport</b> und die Weiterleitung offener <b>Lieferantenrechnungen</b> zur Zahlungsfreigabe laufen über die Qonto Business API.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-top"><h3>Finom, N26, Sparkasse&nbsp;…</h3><span class="badge opt">Über Qonto</span></div>
+          <p>Alles, was du in Qonto per <b>Konto-Aggregation</b> verbindest, sieht der Agent automatisch mit — externe Konten laufen durch dieselbe Logik wie die AMEX-Karten (<code class="fn">is_external_account</code>).</p>
+          <p>Ob Volksbank, DKB, Commerzbank oder weitere Karten: Ein Qonto-Konto als Zentrale genügt, um praktisch jede in Deutschland übliche Bank einzubinden.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-top"><h3>Ohne Qonto</h3><span class="badge opt">Roadmap</span></div>
+          <p>Ein Adapter für <b>GoCardless Bank Account Data</b> (kostenlose PSD2-Schnittstelle für über 2.000 europäische Banken) ist angedacht.</p>
+          <p>Die Qonto-Zugriffe sind im Code bewusst in zwei kleinen Funktionen gekapselt (<code class="fn">qontoAccounts_</code>, <code class="fn">qontoTransactions_</code>) — Contributions willkommen.</p>
+        </article>
+
+      </div>
+      <div class="flow-note">
+        <h3>Und Bargeld?</h3>
+        <p>Papierbelege scannst du einfach in den Drive-Ordner und hängst manuell <b>_Kasse</b> an den Dateinamen — der Abgleich toleriert das Suffix.</p>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ NAMING ============ -->
   <section class="section" id="naming">
     <div class="container">
       <div class="section-head">
         <p class="label">Naming-Convention</p>
         <h2>Ein Dateiname, der alles verrät</h2>
-        <p>Jedes PDF wird nach dem Muster <strong>YYYY-MM-DD_Anbieter_Nummer_BetragWÄHRUNG.pdf</strong> benannt — sortierbar, durchsuchbar und maschinenlesbar für den Abgleich.</p>
+        <p>Jedes PDF wird nach dem Muster <strong>Datum_Anbieter_Nummer_Betrag[_Konto].pdf</strong> benannt — sortierbar, durchsuchbar und maschinenlesbar für den Abgleich. Den Konto-Tag am Ende vergibt der Agent erst beim Abgleich.</p>
       </div>
 
       <div class="filename-demo">
-        <div class="filename" role="img" aria-label="Beispiel-Dateiname: 2026-06-14_Anthropic_INV-2026-0421_42.35USD.pdf">
-          <span class="seg"><code>2026-06-14</code><span>Rechnungsdatum</span></span>
+        <div class="filename" role="img" aria-label="Beispiel-Dateiname: 2026-07-06_Musicbed_sub-1579529_99.99USD_AMEX-Max.pdf">
+          <span class="seg"><code>2026-07-06</code><span>Rechnungsdatum</span></span>
           <span class="sep">_</span>
-          <span class="seg"><code>Anthropic</code><span>Anbieter</span></span>
+          <span class="seg"><code>Musicbed</code><span>Anbieter</span></span>
           <span class="sep">_</span>
-          <span class="seg"><code>INV-2026-0421</code><span>Rechnungsnummer</span></span>
+          <span class="seg"><code>sub-1579529</code><span>Rechnungsnummer</span></span>
           <span class="sep">_</span>
-          <span class="seg"><code>42.35USD</code><span>Betrag + Währung</span></span>
+          <span class="seg"><code>99.99USD</code><span>Betrag + Währung</span></span>
+          <span class="sep">_</span>
+          <span class="seg"><code>AMEX-Max</code><span>Konto · beim Match</span></span>
           <span class="sep">.pdf</span>
         </div>
       </div>
@@ -605,6 +672,10 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
           </div>
           <p style="margin:14px 0 0;font-size:.88rem;color:var(--muted)">Der monatliche AMEX-Kartenausgleich ist bewusst dabei: Seine Belege sind ja die Einzeltransaktionen auf der Karte.</p>
         </div>
+        <div class="panel panel-wide">
+          <h3>Der Konto-Tag: entsteht erst beim Abgleich</h3>
+          <p style="margin:0;font-size:.95rem;color:var(--muted)">Sobald der tägliche Beleg-Check ein PDF einer Abbuchung zuordnet, hängt der Agent das Zahlungskonto automatisch als Suffix an den Dateinamen: <code>_Qonto-&lt;Kontoname&gt;</code> bei Qonto-Konten, <code>_AMEX-&lt;Inhaber&gt;</code> bei Kreditkarten (der Name kommt aus dem <code>AMEX_KARTEN</code>-Mapping). Früher geht das nicht — beim Ablegen weiß noch niemand, von welchem Konto die Rechnung später abgebucht wird. Für Barbelege hängst du manuell <code>_Kasse</code> an; der Abgleich toleriert das Suffix.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -615,7 +686,7 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
       <div class="section-head">
         <p class="label">Loslegen</p>
         <h2>Setup in 8 Schritten</h2>
-        <p>Du brauchst keinen Server und keine Entwicklungsumgebung — nur dein Google-Konto und ein paar API-Keys. Die ausführliche Anleitung steht im <a href="https://github.com/Burakaz/rechnungs-agent">README des Repos</a>.</p>
+        <p>Du brauchst keinen Server und keine Entwicklungsumgebung — nur dein Google-Konto und ein paar API-Keys. Die ausführliche Anleitung steht im <a href="https://github.com/Burakaz/rechnungs-agent">README des Repos</a>. Oder du nimmst die Abkürzung: <a href="#claude-code">mit Claude Code einrichten&nbsp;↓</a></p>
       </div>
       <ol class="steps">
         <li><b>Drive-Ordner anlegen</b><p>Erstelle den Ziel-Ordner für deine Belege in Google Drive und trage seine ID als <code>DRIVE_FOLDER_ID</code> in die CONFIG ein.</p></li>
@@ -627,6 +698,43 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
         <li><b>Optional: GMI, lexoffice, DATEV</b><p>GetMyInvoices für Portal-Rechnungen, lexoffice für Ausgangsrechnungen, DATEV-Upload-Mail-Adressen für die Weitergabe an die Buchhaltung.</p></li>
         <li><b>Optional: weitere Postfächer</b><p>Installiere dieselbe Datei in zusätzlichen Postfächern. Über die geteilte Hash-Datei (Drive-Freigabe) erkennen sich alle Installationen — Duplikate sind ausgeschlossen.</p></li>
       </ol>
+    </div>
+  </section>
+
+  <!-- ============ CLAUDE CODE ============ -->
+  <section class="section" id="claude-code">
+    <div class="container">
+      <div class="section-head">
+        <p class="label">Die Abkürzung</p>
+        <h2>Mit Claude Code einrichten</h2>
+        <p>Am schnellsten geht die Einrichtung mit <a href="https://claude.com/claude-code">Claude Code</a> — kopiere diesen Prompt und Claude führt dich durch alles, Schritt für Schritt und immer mit deinem Okay.</p>
+      </div>
+      <div class="prompt-box">
+        <div class="prompt-head">
+          <span class="prompt-title">Prompt zum Kopieren</span>
+          <button class="copy-btn" id="copy-prompt-btn" type="button" onclick="copyPrompt()">Prompt kopieren</button>
+        </div>
+        <pre class="codeblock" id="claude-prompt">Richte mir den „Rechnungs-Agent" ein: https://github.com/Burakaz/rechnungs-agent
+
+Lies zuerst das README des Repos komplett. Führe mich dann Schritt für Schritt
+durch die Einrichtung — immer nur ein Schritt, warte jeweils auf mein Okay:
+
+1. Google-Drive-Ordner für Belege anlegen (oder nimm meinen bestehenden) und
+   die Ordner-ID ermitteln.
+2. Auf script.google.com ein neues Apps-Script-Projekt anlegen und Code.gs +
+   appsscript.json aus dem Repo einfügen.
+3. Die CONFIG gemeinsam ausfüllen — erkläre mir zu jedem Feld, wo ich den Wert
+   herbekomme. Wichtig: API-Keys und Secrets trage ICH selbst ein.
+4. setup() ausführen und die Google-Freigaben bestätigen.
+5. Qonto: API-Schlüssel anlegen, meine Kreditkarten und Fremdbank-Konten per
+   Konto-Aggregation verbinden, dann per Testlauf prüfen, dass alle Konten
+   gefunden werden (externe Konten kommen über GET /v2/bank_accounts!).
+6. Optional einrichten, je nachdem was ich nutze: Slack-Webhook, GetMyInvoices,
+   lexoffice-Ausgangsrechnungen, DATEV Upload-Mail.
+
+Zum Schluss: Testlauf machen und mir zeigen, dass die erste Rechnung sauber
+benannt in Google Drive liegt.</pre>
+      </div>
     </div>
   </section>
 
@@ -719,6 +827,17 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
     </div>
   </div>
 </footer>
+
+<script>
+  function copyPrompt(){
+    var text = document.getElementById('claude-prompt').innerText;
+    navigator.clipboard.writeText(text).then(function(){
+      var btn = document.getElementById('copy-prompt-btn');
+      btn.textContent = 'Kopiert ✓';
+      setTimeout(function(){ btn.textContent = 'Prompt kopieren'; }, 2000);
+    });
+  }
+</script>
 
 </body>
 </html>
