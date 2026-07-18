@@ -258,6 +258,23 @@
   .card ul li{position:relative;padding-left:20px;margin:8px 0}
   .card ul li::before{content:"";position:absolute;left:2px;top:.62em;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 
+  /* ---------- Icons ---------- */
+  .ic{width:20px;height:20px;display:inline-block;vertical-align:middle;flex:0 0 auto}
+  .ic-chip{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:44px;height:44px;border-radius:13px;flex:0 0 auto;
+    background:var(--accent-soft);border:1px solid rgba(198,255,58,.22);color:var(--accent);
+    margin-bottom:16px;transition:transform .22s var(--ease),box-shadow .22s var(--ease);
+  }
+  .ic-chip .ic{width:22px;height:22px}
+  .card:hover .ic-chip{transform:translateY(-1px);box-shadow:0 8px 24px -12px var(--neon-glow)}
+  .bank-head{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+  .bank-head .ic-chip{margin-bottom:0;width:40px;height:40px}
+  .bank-head .ic-chip .ic{width:20px;height:20px}
+  .bank-head h3{margin:0}
+  .bank-head .badge{margin-left:auto}
+  .flow-note h3 .ic{color:var(--accent);margin-right:9px}
+
   /* ---------- Code ---------- */
   .code-grid{display:grid;gap:16px}
   @media (min-width:920px){.code-grid{grid-template-columns:1fr 1fr}}
@@ -533,6 +550,7 @@
       <div class="cards">
 
         <article class="card reveal">
+          <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M4 7.5l8 5 8-5"/></svg></span>
           <div class="card-top"><code class="fn">processInvoices()</code><span class="badge">Stündlich</span></div>
           <h3>Gmail-Rechnungen erkennen &amp; ablegen</h3>
           <p>Scannt deine Gmail-Postfächer nach Rechnungs-Mails (Keywords + PDF-Anhang). Claude Haiku bekommt das PDF als Dokument und extrahiert <b>Anbieter, Rechnungsnummer, Betrag, Währung, Datum</b> — und den Typ: offene Rechnung oder bereits bezahlter Beleg.</p>
@@ -541,6 +559,7 @@
         </article>
 
         <article class="card reveal">
+          <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.2"/><path d="M20 20l-4.7-4.7"/></svg></span>
           <div class="card-top"><code class="fn">checkMissingReceipts()</code><span class="badge">Täglich 9 Uhr</span></div>
           <h3>Fehlende Belege finden &amp; erinnern</h3>
           <p>Holt alle Qonto-Konten inklusive der per Konto-Aggregation verbundenen <b>AMEX-Karten</b> und prüft jede Abbuchung der letzten 35 Tage: Beleg vorhanden? Zählt als Beleg: Qonto-Anhang <b>oder</b> passendes Drive-PDF <b>oder</b> Dauerbeleg.</p>
@@ -549,6 +568,7 @@
         </article>
 
         <article class="card reveal">
+          <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M9.5 9.5v10M3.5 14.5h17"/></svg></span>
           <div class="card-top"><code class="fn">monthlyBelegReport()</code><span class="badge">1. des Monats</span></div>
           <h3>Report für die Buchhalterin</h3>
           <p>Erzeugt im BelegCheck-Spreadsheet der Buchhalterin <b>zwei Tabs für den Vormonat</b> — einen für die Qonto-Konten, einen für AMEX — mit allen Transaktionen und vorbefüllten BELEG-Checkboxen.</p>
@@ -556,13 +576,16 @@
         </article>
 
         <article class="card reveal">
+          <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v9.5"/><path d="M8.3 9.7l3.7 3.7 3.7-3.7"/><path d="M4.5 15.5v3A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5v-3"/></svg></span>
           <div class="card-top"><code class="fn">pullGmiDocuments()</code><span class="badge opt">Stündlich · Optional</span></div>
           <h3>Portal-Rechnungen ohne Mail</h3>
           <p>Manche Rechnungen kommen <b>nie per Mail</b> — sie liegen in Portalen wie Amazon Business, Webflow oder Higgsfield. Diese Automatik holt sie über die <b>GetMyInvoices-API</b> und legt sie mit derselben Naming-Convention in Drive ab.</p>
+          <p>Den GMI-Zugang gibt's bei <b>American Express Business-Karten als Partnervorteil inklusive</b> (kostenloser Plan: 40 Belege/Monat, bis zu 10 Portal-Verbindungen) — kein Extra-Abo nötig.</p>
           <p>Der Hash-Dedupe verhindert Doppelablagen mit dem Mail-Weg — kommt eine Rechnung über beide Kanäle, gewinnt der erste.</p>
         </article>
 
         <article class="card reveal">
+          <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 3.5H6.5v17h11V7.5z"/><path d="M13.5 3.5v4h4"/><path d="M9.5 15l5-5M10.5 10h4v4"/></svg></span>
           <div class="card-top"><code class="fn">pullLexofficeInvoices()</code><span class="badge opt">Stündlich · Optional</span></div>
           <h3>Eigene Ausgangsrechnungen</h3>
           <p>Zieht deine <b>Ausgangsrechnungen und Gutschriften</b> (keine Entwürfe) aus Lexware Office über die lexoffice Public API — in einen getrennten Drive-Baum <code class="fn">Ausgangsrechnungen/&lt;Jahr&gt;/&lt;YYYY-MM&gt;/</code>.</p>
@@ -570,6 +593,7 @@
         </article>
 
         <article class="card reveal">
+          <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l1.5 4.6 4.6 1.5-4.6 1.5L12 15.7l-1.5-4.6L5.9 9.6l4.6-1.5z"/><path d="M18.5 15l.6 1.9 1.9.6-1.9.6-.6 1.9-.6-1.9-1.9-.6 1.9-.6z"/></svg></span>
           <div class="card-top"><code class="fn">+ Extras</code><span class="badge opt">Bei Bedarf</span></div>
           <h3>Backfill &amp; DATEV</h3>
           <ul>
@@ -643,24 +667,46 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
       <div class="section-head reveal">
         <p class="eyebrow">Kompatibilität</p>
         <h2>Welche Banken funktionieren?</h2>
-        <p class="sub">Praktisch jede: Qonto ist nativ integriert, alles Weitere kommt per Qonto-Konto-Aggregation dazu — oder ganz ohne Qonto über den eingebauten GoCardless-Adapter.</p>
+        <p class="sub">Zwei Wege, praktisch jede Bank: <b>mit einem Qonto-Konto</b> als Zentrale kommt alles Weitere per Konto-Aggregation dazu (AMEX-Karten, Fremdbanken) — oder <b>ganz ohne Qonto</b> über den eingebauten GoCardless-Adapter.</p>
       </div>
-      <div class="cards cards-3">
+      <div class="cards">
 
         <article class="card reveal">
-          <div class="card-top"><h3>Qonto</h3><span class="badge">Nativ</span></div>
-          <p>Direkt per API integriert: der tägliche <b>Beleg-Check</b>, der <b>Monatsreport</b> und die Weiterleitung offener <b>Lieferantenrechnungen</b> zur Zahlungsfreigabe laufen über die Qonto Business API.</p>
+          <div class="bank-head">
+            <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9.5L12 4.5l8.5 5"/><path d="M5.5 9.8V18M9.5 9.8V18M14.5 9.8V18M18.5 9.8V18"/><path d="M4 18.5h16"/></svg></span>
+            <h3>Qonto</h3>
+            <span class="badge">Nativ</span>
+          </div>
+          <p>Die <b>Zentrale</b>, direkt per API integriert: der tägliche <b>Beleg-Check</b>, der <b>Monatsreport</b> und die Weiterleitung offener <b>Lieferantenrechnungen</b> zur Zahlungsfreigabe laufen über die Qonto Business API.</p>
         </article>
 
         <article class="card reveal">
-          <div class="card-top"><h3>Finom, N26, Sparkasse&nbsp;…</h3><span class="badge opt">Über Qonto</span></div>
-          <p>Alles, was du in Qonto per <b>Konto-Aggregation</b> verbindest, sieht der Agent automatisch mit — externe Konten laufen durch dieselbe Logik wie die AMEX-Karten (<code class="fn">is_external_account</code>).</p>
-          <p>Ob Volksbank, DKB, Commerzbank oder weitere Karten: Ein Qonto-Konto als Zentrale genügt, um praktisch jede in Deutschland übliche Bank einzubinden.</p>
+          <div class="bank-head">
+            <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3 9.5h18"/><path d="M6.5 14.5h4"/></svg></span>
+            <h3>AMEX Business</h3>
+            <span class="badge">Karte + GMI</span>
+          </div>
+          <p>Spielt <b>doppelt</b> mit: Die Kartenumsätze kommen per Qonto-Konto-Aggregation in den Beleg-Check — und <b>GetMyInvoices ist als Partnervorteil enthalten</b> (kostenloser Plan: 40 Belege/Monat, bis zu 10 Portal-Verbindungen).</p>
+          <p>Genau diesen Zugang nutzt <code class="fn">pullGmiDocuments()</code>, um Portal-Rechnungen (Amazon Business, Webflow&nbsp;…) ohne Extra-Abo automatisch zu ziehen.</p>
         </article>
 
         <article class="card reveal">
-          <div class="card-top"><h3>Ohne Qonto: GoCardless</h3><span class="badge">Eingebaut</span></div>
-          <p>Der Agent bindet über <b>GoCardless Bank Account Data</b> (kostenlose PSD2-Schnittstelle, 2.000+ europäische Banken — Sparkasse, Volksbank, DKB, Commerzbank, N26, Finom, Holvi&nbsp;…) beliebige Firmenkonten direkt ein — ganz ohne Qonto, oder zusätzlich dazu.</p>
+          <div class="bank-head">
+            <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.3"/><circle cx="5.2" cy="6" r="1.7"/><circle cx="18.8" cy="6" r="1.7"/><circle cx="5.2" cy="18" r="1.7"/><circle cx="18.8" cy="18" r="1.7"/><path d="M10.3 10.6L6.6 7.3M13.7 10.6l3.7-3.3M10.3 13.4l-3.7 3.3M13.7 13.4l3.7 3.3"/></svg></span>
+            <h3>Finom, N26, Sparkasse&nbsp;…</h3>
+            <span class="badge opt">Über Qonto</span>
+          </div>
+          <p>Alles, was du in Qonto per <b>Konto-Aggregation</b> verbindest, sieht der Agent automatisch mit — Volksbank, DKB, Commerzbank und weitere laufen durch dieselbe <code class="fn">is_external_account</code>-Logik wie die AMEX-Karten.</p>
+          <p><b>Voraussetzung:</b> ein Qonto-Geschäftskonto als Zentrale. Kein Qonto? Dann führt der nächste Weg zum Ziel.</p>
+        </article>
+
+        <article class="card reveal">
+          <div class="bank-head">
+            <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a3.5 3.5 0 0 1 0-5l2-2a3.5 3.5 0 0 1 5 5l-1 1"/><path d="M14 10a3.5 3.5 0 0 1 0 5l-2 2a3.5 3.5 0 0 1-5-5l1-1"/></svg></span>
+            <h3>Ohne Qonto: GoCardless</h3>
+            <span class="badge">Eingebaut</span>
+          </div>
+          <p>Kein Qonto nötig: Der Agent bindet über <b>GoCardless Bank Account Data</b> (kostenlose PSD2-Schnittstelle, 2.000+ europäische Banken — Sparkasse, Volksbank, DKB, Commerzbank, N26, Finom, Holvi&nbsp;…) beliebige Firmenkonten direkt ein — auch zusätzlich zu Qonto.</p>
           <p>Gematchte Belege bekommen das Suffix <code class="fn">_Bank-&lt;Kontoname&gt;</code>.</p>
         </article>
 
@@ -676,7 +722,7 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
 
       </div>
       <div class="flow-note reveal">
-        <h3>Und Bargeld?</h3>
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6.5" width="18" height="11" rx="1.6"/><circle cx="12" cy="12" r="2.4"/><path d="M6.5 9.5v5M17.5 9.5v5"/></svg>Und Bargeld?</h3>
         <p>Papierbelege scannst du einfach in den Drive-Ordner und hängst manuell <b>_Kasse</b> an den Dateinamen — der Abgleich toleriert das Suffix.</p>
       </div>
     </div>
@@ -812,7 +858,7 @@ benannt in Google Drive liegt.</pre>
           <summary>Was kostet der Betrieb?<span class="plus" aria-hidden="true"></span></summary>
           <div class="answer">
             <p>Apps Script läuft kostenlos in deinem Google-Konto — es gibt keinen Server und kein Hosting. Die KI-Extraktion mit <b>Claude Haiku</b> kostet bei normalem Rechnungsvolumen <b>wenige Euro pro Monat</b>.</p>
-            <p>Optional dazu kommen die Tarife der Dienste, die du ohnehin nutzt bzw. dazubuchst: GetMyInvoices (achte auf das Dokumenten-Kontingent deines Tarifs) und Lexware Office.</p>
+            <p>Optional dazu kommen die Tarife der Dienste, die du ohnehin nutzt bzw. dazubuchst: GetMyInvoices (achte auf das Dokumenten-Kontingent deines Tarifs) und Lexware Office. <b>Tipp:</b> Bei <b>American Express Business-Karten</b> ist ein GetMyInvoices-Plan als Partnervorteil enthalten (40 Belege/Monat, bis zu 10 Portale) — dann ist der Portal-Abruf gratis.</p>
           </div>
         </details>
 
