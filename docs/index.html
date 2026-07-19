@@ -347,6 +347,33 @@
 
   .flogo{height:15px;width:auto;display:block;color:var(--ink-bright);margin-bottom:10px}
 
+  /* ---------- Toolstack-Leiste ---------- */
+  .stack-strip{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px}
+  .schip{
+    display:inline-flex;align-items:center;gap:11px;
+    background:var(--card);border:1px solid var(--card-bd);border-radius:var(--r-sm);
+    padding:10px 16px 10px 10px;transition:border-color .2s var(--ease),transform .2s var(--ease);
+  }
+  .schip:hover{border-color:var(--line-strong);transform:translateY(-2px)}
+  .schip .tile{
+    flex:0 0 auto;height:32px;min-width:32px;background:#fff;border-radius:8px;
+    display:flex;align-items:center;justify-content:center;padding:5px 7px;
+  }
+  .schip .tile img{max-height:20px;max-width:140px;display:block}
+  .schip .meta{display:block}
+  .schip b{display:block;color:var(--ink-bright);font-weight:600;font-size:.87rem;white-space:nowrap}
+  .schip .role{
+    display:block;font-family:var(--mono);font-size:.6rem;letter-spacing:.09em;
+    text-transform:uppercase;color:var(--muted);margin-top:2px;white-space:nowrap;
+  }
+  .stack-note{
+    display:flex;align-items:flex-start;gap:11px;margin-top:20px;
+    font-size:.9rem;color:var(--soft);max-width:56em;line-height:1.6;
+  }
+  .stack-note .led{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 9px var(--neon-glow);margin-top:7px}
+  .bank-tile.wide{width:auto;min-width:110px;padding:7px 14px;height:34px}
+  .bank-tile.wide img{max-height:19px;max-width:150px}
+
   /* ---------- Code ---------- */
   .code-grid{display:grid;gap:16px}
   @media (min-width:920px){.code-grid{grid-template-columns:1fr 1fr}}
@@ -536,6 +563,26 @@
     </div>
   </section>
 
+  <!-- ============ TOOLSTACK ============ -->
+  <section class="section" id="stack" style="padding:52px 0">
+    <div class="container">
+      <div class="section-head reveal" style="margin-bottom:26px">
+        <p class="eyebrow">Der Stack, der bei uns täglich läuft</p>
+      </div>
+      <div class="stack-strip reveal">
+        <span class="schip"><span class="tile"><img src="logos/google-g.svg" alt="Google Workspace"></span><span class="meta"><b>Google Workspace</b><span class="role">Fundament · serverlos</span></span></span>
+        <span class="schip"><span class="tile"><img src="logos/claude.svg" alt="Claude"></span><span class="meta"><b>Claude</b><span class="role">KI liest jedes PDF</span></span></span>
+        <span class="schip"><span class="tile"><img src="logos/qonto.svg" alt="Qonto"></span><span class="meta"><b>Qonto</b><span class="role">Bank-Zentrale</span></span></span>
+        <span class="schip"><span class="tile"><img src="logos/amex.svg" alt="American Express"></span><span class="meta"><b>AMEX Business</b><span class="role">Firmenkarten</span></span></span>
+        <span class="schip"><span class="tile"><img src="logos/gmi.svg?v=2" alt="GetMyInvoices"></span><span class="meta"><b>GetMyInvoices</b><span class="role">Portal-Abrufe</span></span></span>
+        <span class="schip"><span class="tile"><img src="logos/slack.svg" alt="Slack"></span><span class="meta"><b>Slack</b><span class="role">Erinnerungen</span></span></span>
+        <span class="schip"><span class="tile"><img src="logos/lexware.svg" alt="Lexware Office"></span><span class="meta"><b>Lexware Office</b><span class="role">Ausgangsrechnungen</span></span></span>
+        <span class="schip"><span class="tile"><img src="logos/gocardless.svg?v=2" alt="GoCardless"></span><span class="meta"><b>GoCardless</b><span class="role">Bank-Adapter</span></span></span>
+      </div>
+      <p class="stack-note reveal"><span class="led"></span><span><b>Schon im Preis deiner Karte:</b> Bei American Express Business ist GetMyInvoices als Partnervorteil enthalten (40 Belege/Monat, bis zu 10 Portal-Verbindungen) — genau der Baustein, der Rechnungen aus Portalen ohne Mail-Versand abholt. Die Portal-Abrufe kosten dich also nichts extra.</span></p>
+    </div>
+  </section>
+
   <!-- ============ GOOGLE WORKSPACE ============ -->
   <section class="section" id="workspace">
     <div class="container">
@@ -718,9 +765,10 @@
           <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v9.5"/><path d="M8.3 9.7l3.7 3.7 3.7-3.7"/><path d="M4.5 15.5v3A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5v-3"/></svg></span>
           <div class="card-top"><code class="fn">pullGmiDocuments()</code><span class="badge opt">Stündlich · Optional</span></div>
           <h3>Portal-Rechnungen ohne Mail</h3>
-          <p>Manche Rechnungen kommen <b>nie per Mail</b> — sie liegen in Portalen wie Amazon Business, Webflow oder Higgsfield. Diese Automatik holt sie über die <b>GetMyInvoices-API</b> und legt sie mit derselben Naming-Convention in Drive ab.</p>
-          <p>Den GMI-Zugang gibt's bei <b>American Express Business-Karten als Partnervorteil inklusive</b> (kostenloser Plan: 40 Belege/Monat, bis zu 10 Portal-Verbindungen) — kein Extra-Abo nötig.</p>
-          <p>Der Hash-Dedupe verhindert Doppelablagen mit dem Mail-Weg — kommt eine Rechnung über beide Kanäle, gewinnt der erste.</p>
+          <p>Manche Anbieter verschicken <b>nie eine Rechnungs-Mail</b> — die PDFs liegen nur in deren Portal: Stripe-basierte Tools, Marktplätze wie Amazon Business, Software-Abos wie Webflow oder Higgsfield. Genau diese Lücke schließt <b>GetMyInvoices</b>:</p>
+          <p style="margin:14px 0"><span class="bank-tile wide" style="display:inline-flex"><img src="logos/gmi.svg?v=2" alt="GetMyInvoices" loading="lazy"></span></p>
+          <p>GetMyInvoices ist ein <b>Rechnungs-Abholdienst</b>: Er loggt sich in deine Portale ein und sammelt die Rechnungen dort zentral ein. Diese Automatik holt sie per API ab und legt sie mit derselben Naming-Convention in Drive — der Hash-Dedupe verhindert Doppel mit dem Mail-Weg.</p>
+          <p>Den GMI-Zugang gibt's bei <b>American Express Business-Karten als Partnervorteil inklusive</b> (kostenloser Plan: 40 Belege/Monat, bis zu 10 Portal-Verbindungen) — kein Extra-Abo nötig. Nischen-Portale, die nur die GMI-Desktop-App kann (z.&nbsp;B. Higgsfield): dort verbinden, die Zugangsdaten bleiben lokal.</p>
         </article>
 
         <article class="card reveal">

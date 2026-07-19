@@ -17,6 +17,21 @@ Der Agent ist kein fremdes Tool, sondern ein Skript in deinem eigenen Google-Kon
 
 Zum Start genügt ein **kostenloses Google-Konto** — mit **Google Workspace** (eigene Domain, mehrere Postfächer, zentrale Verwaltung) spielt das System seine ganze Stärke aus. Keine Server, keine Zwischenhändler: Deine Daten und API-Keys bleiben bei dir.
 
+## Der Tool-Stack
+
+So sieht der komplette Stack aus, der bei uns täglich läuft — jedes Tool ist optional zuschaltbar:
+
+| Tool | Rolle | Kosten-Hinweis |
+|------|-------|----------------|
+| **Google Workspace** | Fundament: Gmail, Apps Script, Drive, Sheets | Kostenloses Google-Konto genügt |
+| **Claude (Anthropic)** | KI liest jedes PDF: Anbieter, Nummer, Betrag, Datum, offen/bezahlt | Wenige Euro pro Monat (Haiku) |
+| **Qonto** | Bank-Zentrale: Beleg-Check, Monatsreport, Rechnungs-Freigabe, Konto-Aggregation | Kleinster Tarif genügt |
+| **AMEX Business** | Firmenkarten — Umsätze via Qonto-Aggregation im Beleg-Check | GetMyInvoices als Partnervorteil **inklusive** |
+| **GetMyInvoices** | Rechnungs-Abholdienst: loggt sich in Portale ein, die **nie eine Rechnungs-Mail schicken** (Stripe-Tools, Amazon Business, Webflow, Higgsfield …), und sammelt die PDFs zentral — der Agent holt sie per API ab | Bei AMEX Business inklusive (40 Belege/Monat, bis zu 10 Portale) |
+| **Slack** | Erinnerungen mit @-Mention der zuständigen Person | Incoming Webhook, 0 € |
+| **Lexware Office** | Eigene Ausgangsrechnungen → getrennter Drive-Baum | Public API im Tarif enthalten |
+| **GoCardless** | Bank-Adapter für alle ohne Qonto (Sparkasse, Volksbank, N26 …) | Kostenlos — nur mit Bestandszugang (siehe Status-Hinweis unten) |
+
 ## Lückenlos: jede Beleg-Quelle abgedeckt
 
 Belege entstehen an sechs verschiedenen Stellen — für jede hat der Agent einen Weg:
