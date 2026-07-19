@@ -109,10 +109,12 @@
   }
   .nav-inner{display:flex;align-items:center;gap:22px;height:var(--topbar-h)}
   .brand{
-    display:inline-flex;align-items:center;gap:9px;
-    font-family:var(--mono);font-size:.82rem;font-weight:600;letter-spacing:.08em;
+    display:inline-flex;align-items:center;gap:10px;
+    font-family:var(--mono);font-size:.78rem;font-weight:600;letter-spacing:.08em;
     text-transform:uppercase;text-decoration:none;white-space:nowrap;color:var(--ink-bright);
   }
+  .brand-logo{height:13px;width:auto;display:block;color:var(--ink-bright);transition:color .18s var(--ease)}
+  .brand:hover .brand-logo{color:var(--accent)}
   .brand .dot{color:var(--accent)}
   .brand .sub{color:var(--muted);font-weight:500}
   .brand .ver{
@@ -275,6 +277,76 @@
   .bank-head .badge{margin-left:auto}
   .flow-note h3 .ic{color:var(--accent);margin-right:9px}
 
+  /* ---------- Google-Workspace-Sektion ---------- */
+  .ws-head{display:flex;align-items:flex-start;gap:22px}
+  .glogo{
+    flex:0 0 auto;width:64px;height:64px;padding:12px;
+    background:#fff;border-radius:18px;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 10px 34px -14px rgba(0,0,0,.65);
+  }
+  .glogo img{width:100%;height:100%;display:block}
+  @media (max-width:640px){.ws-head{flex-direction:column;gap:16px}.glogo{width:54px;height:54px;padding:10px;border-radius:15px}}
+  .ws-grid{display:grid;gap:16px;margin-top:8px}
+  @media (min-width:680px){.ws-grid{grid-template-columns:1fr 1fr}}
+  @media (min-width:1020px){.ws-grid{grid-template-columns:repeat(4,1fr)}}
+  .ws-card{
+    background:var(--card);border:1px solid var(--card-bd);border-radius:var(--r);
+    padding:24px 22px;transition:border-color .22s var(--ease),transform .22s var(--ease);
+  }
+  .ws-card:hover{border-color:var(--line-strong);transform:translateY(-3px)}
+  .ws-icon{
+    width:42px;height:42px;padding:9px;background:#fff;border-radius:12px;
+    display:flex;align-items:center;justify-content:center;margin-bottom:15px;
+  }
+  .ws-icon img{max-width:100%;max-height:100%;display:block}
+  .ws-card h3{font-size:1.02rem;margin-bottom:4px}
+  .ws-card .role{
+    font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:10px;
+  }
+  .ws-card p{margin:0;font-size:.87rem;color:var(--soft);line-height:1.6}
+
+  /* ---------- Lückenlos-Quellen ---------- */
+  .src-grid{display:grid;gap:14px;margin-top:8px}
+  @media (min-width:680px){.src-grid{grid-template-columns:1fr 1fr}}
+  @media (min-width:1020px){.src-grid{grid-template-columns:repeat(3,1fr)}}
+  .src{
+    background:var(--card);border:1px solid var(--card-bd);border-radius:var(--r-sm);
+    padding:18px 20px;transition:border-color .2s var(--ease);
+  }
+  .src:hover{border-color:var(--line-strong)}
+  .src b{display:block;color:var(--ink-bright);font-weight:600;margin-bottom:5px;font-size:.95rem}
+  .src p{margin:0;font-size:.85rem;color:var(--muted);line-height:1.55}
+  .src .via{
+    display:inline-block;font-family:var(--mono);font-size:.68rem;color:var(--accent);
+    margin-top:9px;
+  }
+
+  /* ---------- Bank-Matrix ---------- */
+  .bank-grid{display:grid;gap:14px;margin-top:26px}
+  @media (min-width:640px){.bank-grid{grid-template-columns:1fr 1fr}}
+  @media (min-width:1020px){.bank-grid{grid-template-columns:repeat(3,1fr)}}
+  .bank{
+    background:var(--card);border:1px solid var(--card-bd);border-radius:var(--r-sm);
+    padding:18px;transition:border-color .2s var(--ease),transform .2s var(--ease);
+  }
+  .bank:hover{border-color:var(--line-strong);transform:translateY(-2px)}
+  .bank-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+  .bank-tile{
+    flex:0 0 auto;width:56px;height:38px;background:#fff;border-radius:9px;
+    display:flex;align-items:center;justify-content:center;padding:6px 8px;
+  }
+  .bank-tile img{max-width:100%;max-height:24px;display:block}
+  .bank-row b{color:var(--ink-bright);font-weight:600;font-size:.95rem;line-height:1.25}
+  .bank-row .badge{margin-left:auto}
+  .bank p{margin:0;font-size:.83rem;color:var(--muted);line-height:1.55}
+  .bank p code{font-size:.86em}
+  .trademark-note{
+    margin-top:22px;font-size:.76rem;color:var(--muted);max-width:60em;line-height:1.6;
+  }
+
+  .flogo{height:15px;width:auto;display:block;color:var(--ink-bright);margin-bottom:10px}
+
   /* ---------- Code ---------- */
   .code-grid{display:grid;gap:16px}
   @media (min-width:920px){.code-grid{grid-template-columns:1fr 1fr}}
@@ -416,8 +488,12 @@
 
 <header class="site-header">
   <div class="container nav-inner">
-    <a class="brand" href="#top">ADMKRS<span class="dot">·</span><span class="sub">Rechnungs&#8209;Agent</span><span class="ver">OSS</span></a>
+    <a class="brand" href="#top" aria-label="ADMKRS Rechnungs-Agent">
+      <svg class="brand-logo" viewBox="0 0 1362.2 191.2" fill="currentColor" aria-hidden="true"><path d="M97.6,5.4L0,185.8h33.5l80.9-153.9l80.9,153.9H229L131.7,5.4H97.6z M323.4,5.4H218.6l13.4,27.2l30.9-0.1h58.2c47.4,0,80.4,21.4,80.4,63.1c0,41.7-33,63.1-80.4,63.1h-18.2l-44.3,0.1l13.4,27h51.4c67,0,109.8-34.5,109.8-90.2C433.2,39.9,390.4,5.4,323.4,5.4z M579,108.7L495.3,5.4h-37.5l119.7,146.1h1.8l85.8-104.1v138.4H696V5.4h-33.2L579,108.7z M905.5,5.4h-41.7l-122.6,98.9v33.8L795,94.6l78.1,91.2h37.9L818.5,76.5L905.5,5.4z M1133.2,62.9c0-37.4-30.9-57.5-72.9-57.5l-92.6,1.2v27l90.5-1.1c25.8,0,43.3,8.2,43.3,30.7c0,22.4-17.5,30.7-43.3,30.7l-90.5,0.9l0,26.2l76.9-0.5l55.9,65.4h38.1l-58.5-67C1111.6,113.1,1133.2,94,1133.2,62.9z M1266.9,79.1c-39.4-3.1-69.6-6.4-69.6-25.5c0-20.1,34-27.1,62.6-26.8c29.9,0.3,55.4,8,73.9,24.2l19.6-21.1c-21.6-18.3-54.9-29.9-94-29.9c-51.8,0-93.3,19.8-93.3,55.7c0,36.8,46.9,47.9,96.6,52c45.3,3.9,68,8.8,68,27.3c0,18.8-22.2,29.4-62.3,29.4l-1.3,26.8c61.3,0,95.1-24.5,95.1-58.7C1362.2,94.8,1323.1,83.5,1266.9,79.1z"/></svg>
+      <span class="dot">·</span><span class="sub">Rechnungs&#8209;Agent</span><span class="ver">OSS</span>
+    </a>
     <nav class="jump" aria-label="Sprungnavigation">
+      <a href="#workspace">Workspace</a>
       <a href="#automatiken">Automatiken</a>
       <a href="#ablauf">Ablauf</a>
       <a href="#qonto-amex">Qonto+AMEX</a>
@@ -439,9 +515,9 @@
   <!-- ============ HERO ============ -->
   <section class="hero">
     <div class="container">
-      <p class="eyebrow reveal">Open Source · Google Apps Script · Serverlos</p>
+      <p class="eyebrow reveal">Open Source · Google Workspace · Jede Bank</p>
       <h1 class="reveal">Am Monatsende liegt jeder Beleg da, <span class="accent">wo er hingehört.</span></h1>
-      <p class="lede reveal">Der Rechnungs-Agent liest deine Gmail-Postfächer, erkennt Rechnungen per KI, benennt jedes PDF sauber, legt es nach Jahr und Monat in Google Drive ab — und erinnert dein Team per Slack an alles, was fehlt. Ohne eigenen Server, direkt in deinem Google Workspace.</p>
+      <p class="lede reveal">Der Rechnungs-Agent macht dein Google Workspace zum vollautomatischen Beleg-System: Er liest deine Gmail-Postfächer, erkennt Rechnungen per KI, benennt jedes PDF sauber, legt es nach Jahr und Monat in Google Drive ab — und erinnert dein Team per Slack an alles, was fehlt. Ohne eigenen Server, mit jeder Bank.</p>
       <div class="cta-row reveal">
         <a class="btn btn-primary" href="https://github.com/Burakaz/rechnungs-agent">
           Zum GitHub-Repo
@@ -451,6 +527,7 @@
       </div>
       <div class="pill-row reveal">
         <span class="pill"><span class="led"></span>Serverlos in deinem Google Workspace</span>
+        <span class="pill">Jede Bank anbindbar — von Sparkasse bis N26</span>
         <span class="pill">Keine fremden Server · deine Keys bleiben bei dir</span>
       </div>
       <div class="stats">
@@ -458,6 +535,52 @@
         <div class="stat reveal"><b>0</b><span>Eigene Server</span></div>
         <div class="stat reveal"><b>1</b><span>Skript-Datei</span></div>
         <div class="stat reveal"><b>~ wenige&nbsp;€</b><span>KI-Kosten / Monat</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GOOGLE WORKSPACE ============ -->
+  <section class="section" id="workspace">
+    <div class="container">
+      <div class="section-head reveal" style="max-width:none">
+        <div class="ws-head">
+          <span class="glogo"><img src="logos/google-g.svg" alt="Google" width="64" height="64"></span>
+          <div>
+            <p class="eyebrow" style="margin-bottom:14px">Das Fundament</p>
+            <h2>Läuft komplett in deinem Google&nbsp;Workspace</h2>
+            <p class="sub" style="max-width:48em">Der Agent ist kein fremdes SaaS-Tool, sondern ein Skript in deinem eigenen Google-Konto: Gmail liefert die Rechnungen an, Apps Script arbeitet, Drive archiviert, Sheets berichtet. Keine Server, keine Zwischenhändler — deine Daten und API-Keys bleiben bei dir.</p>
+          </div>
+        </div>
+      </div>
+      <div class="ws-grid">
+        <div class="ws-card reveal">
+          <span class="ws-icon"><img src="logos/gmail.svg" alt="Gmail" loading="lazy"></span>
+          <h3>Gmail</h3>
+          <span class="role">Der Eingang</span>
+          <p>Jede Rechnungs-Mail wird stündlich erkannt — über beliebig viele Postfächer hinweg (Inhaber-Adresse, billing@ …), ohne Duplikate.</p>
+        </div>
+        <div class="ws-card reveal">
+          <span class="ws-icon"><img src="logos/apps-script.svg" alt="Google Apps Script" loading="lazy"></span>
+          <h3>Apps Script</h3>
+          <span class="role">Der Motor</span>
+          <p>Googles kostenlose Automatisierungs-Umgebung führt den Agent per Zeit-Trigger aus — serverlos, direkt in deinem Konto, eine einzige Skript-Datei.</p>
+        </div>
+        <div class="ws-card reveal">
+          <span class="ws-icon"><img src="logos/gdrive.svg" alt="Google Drive" loading="lazy"></span>
+          <h3>Drive</h3>
+          <span class="role">Das Archiv</span>
+          <p>Jeder Beleg sauber benannt unter Jahr/Monat, Eingangs- und Ausgangsrechnungen getrennt — jederzeit für die Steuerkanzlei freigebbar.</p>
+        </div>
+        <div class="ws-card reveal">
+          <span class="ws-icon"><img src="logos/gsheets.svg" alt="Google Sheets" loading="lazy"></span>
+          <h3>Sheets</h3>
+          <span class="role">Der Report</span>
+          <p>Am 1. des Monats stehen die fertigen BelegCheck-Tabs für die Buchhaltung bereit — jede Abbuchung mit vorbefülltem Beleg-Status.</p>
+        </div>
+      </div>
+      <div class="flow-note reveal" style="margin-top:26px">
+        <h3>Was du brauchst</h3>
+        <p>Zum Start genügt ein <b>kostenloses Google-Konto</b> — Gmail, Drive und Apps Script sind überall enthalten. Mit <b>Google Workspace</b> (eigene Domain, mehrere Postfächer wie billing@, zentrale Verwaltung) spielt das System seine ganze Stärke aus. Ein eigener Server, ein Hosting-Vertrag oder Programmier-Kenntnisse sind nicht nötig.</p>
       </div>
     </div>
   </section>
@@ -535,6 +658,25 @@
       <div class="flow-note reveal">
         <h3>Das Herzstück: der Abgleich über den Dateinamen</h3>
         <p>Weil jeder Dateiname Betrag und Währung enthält, kann der Agent Drive-Belege direkt gegen Banktransaktionen matchen: <b>EUR-Belege</b> bei exaktem Betrag im Fenster von ±10&nbsp;Tagen, <b>Fremdwährungsbelege</b> (etwa eine USD-Rechnung gegen die EUR-Abbuchung) über den Anbieter-Namen im Dateinamen plus ein Wechselkurs-Band von 0,7–1,3. Jede Datei wird dabei nur einmal „verbraucht" — striktes 1:1-Matching, kein Beleg deckt zwei Buchungen.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LÜCKENLOS ============ -->
+  <section class="section" id="lueckenlos">
+    <div class="container">
+      <div class="section-head reveal">
+        <p class="eyebrow">Der Anspruch</p>
+        <h2>Lückenlos heißt: jede Quelle ist abgedeckt</h2>
+        <p class="sub">Belege entstehen an sechs verschiedenen Stellen. Für jede einzelne hat der Agent einen Weg — deshalb bleibt am Monatsende nichts offen.</p>
+      </div>
+      <div class="src-grid">
+        <div class="src reveal"><b>Rechnungen per E-Mail</b><p>Der Standardweg: Abos, Dienstleister, Shops. Wird stündlich erkannt, per KI benannt und abgelegt.</p><span class="via">→ processInvoices()</span></div>
+        <div class="src reveal"><b>Portal-Rechnungen ohne Mail</b><p>Amazon Business, Webflow, Higgsfield &amp; Co. verschicken nichts — der Agent holt sie aus den Portalen ab.</p><span class="via">→ pullGmiDocuments()</span></div>
+        <div class="src reveal"><b>Karten- &amp; Kontoabbuchungen</b><p>Jede Abbuchung wird täglich geprüft: Beleg da? Wenn nicht, erinnert Slack die zuständige Person.</p><span class="via">→ checkMissingReceipts()</span></div>
+        <div class="src reveal"><b>Eigene Ausgangsrechnungen</b><p>Kommen aus Lexware Office automatisch in den getrennten Ausgangs-Baum — Eingang und Ausgang sauber getrennt.</p><span class="via">→ pullLexofficeInvoices()</span></div>
+        <div class="src reveal"><b>Papier- &amp; Barbelege</b><p>Einmal in den Drive-Ordner scannen, <b>_Kasse</b> anhängen — der Abgleich nimmt sie mit.</p><span class="via">→ Scan + _Kasse</span></div>
+        <div class="src reveal"><b>Dauerbelege</b><p>Leasing, Miete, Finanzamt, Gehälter: Verträge ersetzen den Monatsbeleg — der Agent weiß das und mahnt nie an.</p><span class="via">→ DAUERBELEG_MUSTER</span></div>
       </div>
     </div>
   </section>
@@ -667,7 +809,7 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
       <div class="section-head reveal">
         <p class="eyebrow">Kompatibilität</p>
         <h2>Welche Banken funktionieren?</h2>
-        <p class="sub">Zwei Wege, praktisch jede Bank: <b>mit einem Qonto-Konto</b> als Zentrale kommt alles Weitere per Konto-Aggregation dazu (AMEX-Karten, Fremdbanken) — oder <b>ganz ohne Qonto</b> über den eingebauten GoCardless-Adapter.</p>
+        <p class="sub">Zwei Wege, praktisch jede Bank: <b>mit einem Qonto-Konto als Zentrale</b> kommt alles Weitere per Konto-Aggregation dazu (AMEX-Karten, deine Hausbank) — oder über den eingebauten <b>GoCardless-Adapter</b> direkt. Deine Hausbank musst du dafür nicht wechseln.</p>
       </div>
       <div class="cards">
 
@@ -688,6 +830,7 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
           </div>
           <p>Spielt <b>doppelt</b> mit: Die Kartenumsätze kommen per Qonto-Konto-Aggregation in den Beleg-Check — und <b>GetMyInvoices ist als Partnervorteil enthalten</b> (kostenloser Plan: 40 Belege/Monat, bis zu 10 Portal-Verbindungen).</p>
           <p>Genau diesen Zugang nutzt <code class="fn">pullGmiDocuments()</code>, um Portal-Rechnungen (Amazon Business, Webflow&nbsp;…) ohne Extra-Abo automatisch zu ziehen.</p>
+          <p><b>Wichtig:</b> GoCardless führt AMEX für Deutschland nicht — die Kartenumsätze kommen ausschließlich über die Qonto-Aggregation ins System.</p>
         </article>
 
         <article class="card reveal">
@@ -696,8 +839,8 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
             <h3>Finom, N26, Sparkasse&nbsp;…</h3>
             <span class="badge opt">Über Qonto</span>
           </div>
-          <p>Alles, was du in Qonto per <b>Konto-Aggregation</b> verbindest, sieht der Agent automatisch mit — Volksbank, DKB, Commerzbank und weitere laufen durch dieselbe <code class="fn">is_external_account</code>-Logik wie die AMEX-Karten.</p>
-          <p><b>Voraussetzung:</b> ein Qonto-Geschäftskonto als Zentrale. Kein Qonto? Dann führt der nächste Weg zum Ziel.</p>
+          <p>Alles, was du in Qonto per <b>Konto-Aggregation</b> verbindest, sieht der Agent automatisch mit — Sparkasse, Volksbank, DKB, Commerzbank und weitere laufen durch dieselbe <code class="fn">is_external_account</code>-Logik wie die AMEX-Karten. Deine Hausbank bleibt deine Hausbank.</p>
+          <p><b>Voraussetzung:</b> ein Qonto-Geschäftskonto als Zentrale (der kleinste Tarif genügt). Das ist Stand heute der <b>empfohlene Weg</b> für alle ohne GoCardless-Bestandskonto.</p>
         </article>
 
         <article class="card reveal">
@@ -706,21 +849,80 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
             <h3>Ohne Qonto: GoCardless</h3>
             <span class="badge">Eingebaut</span>
           </div>
-          <p>Kein Qonto nötig: Der Agent bindet über <b>GoCardless Bank Account Data</b> (kostenlose PSD2-Schnittstelle, 2.000+ europäische Banken — Sparkasse, Volksbank, DKB, Commerzbank, N26, Finom, Holvi&nbsp;…) beliebige Firmenkonten direkt ein — auch zusätzlich zu Qonto.</p>
-          <p>Gematchte Belege bekommen das Suffix <code class="fn">_Bank-&lt;Kontoname&gt;</code>.</p>
+          <p>Kein Qonto nötig: Der Agent bindet über <b>GoCardless Bank Account Data</b> (kostenlose PSD2-Schnittstelle, 2.000+ europäische Banken) beliebige Firmenkonten direkt ein — auch zusätzlich zu Qonto. Gematchte Belege bekommen das Suffix <code class="fn">_Bank-&lt;Kontoname&gt;</code>.</p>
+          <p><b>Ehrlicher Status (Juli 2026):</b> GoCardless nimmt aktuell <b>keine Neuanmeldungen</b> für Bank Account Data an — Bestandskonten laufen weiter, der Adapter bleibt eingebaut und startklar. Ohne Bestandskonto ist der Qonto-Weg links die verlässliche Route.</p>
         </article>
 
         <article class="card card-wide reveal">
           <h3>GoCardless in 3 Schritten einrichten</h3>
+          <p style="margin:0 0 12px;color:var(--soft);font-size:.9rem"><b>Voraussetzung:</b> ein bestehender Bank-Account-Data-Zugang auf <b>bankaccountdata.gocardless.com</b> — Neuanmeldungen sind dort derzeit ausgesetzt (Stand Juli 2026).</p>
           <ul>
-            <li><b>1. Secret anlegen:</b> Kostenlosen Account auf <b>bankaccountdata.gocardless.com</b> erstellen, unter Developers → User secrets ein Secret anlegen und <code class="fn">GOCARDLESS_SECRET_ID</code> / <code class="fn">GOCARDLESS_SECRET_KEY</code> in die CONFIG eintragen.</li>
-            <li><b>2. Bank finden:</b> Im Apps-Script-Editor <code class="fn">gocardlessBankSuchen('sparkasse')</code> ausführen — die Institution-IDs stehen im Log.</li>
-            <li><b>3. Konto verbinden:</b> <code class="fn">gocardlessVerbinden('INSTITUTION_ID')</code> ausführen und den Link aus dem Log/Slack öffnen — einmal bei der Bank anmelden. Der Zugriff gilt bis zu 180 Tage, danach einfach neu verbinden.</li>
+            <li><b>1. Secret anlegen:</b> Unter Developers → User secrets ein Secret erstellen und <code class="fn">GOCARDLESS_SECRET_ID</code> / <code class="fn">GOCARDLESS_SECRET_KEY</code> in die CONFIG eintragen.</li>
+            <li><b>2. Bank finden:</b> Im Apps-Script-Editor <code class="fn">gocardlessBankSuchen('sparkasse')</code> ausführen — die Institution-IDs stehen im Log. Die Suchbegriffe pro Bank stehen in der Übersicht unten.</li>
+            <li><b>3. Konto verbinden:</b> <code class="fn">gocardlessVerbinden('INSTITUTION_ID')</code> ausführen und den Link aus dem Log/Slack öffnen — einmal bei der Bank anmelden und per TAN-App freigeben. Der Zugriff gilt je nach Bank <b>90–180 Tage</b>, danach einfach neu verbinden.</li>
           </ul>
           <p style="margin:16px 0 0;color:var(--soft);font-size:.92rem">Ab dann laufen die Konten automatisch im täglichen Beleg-Check und Monatsreport mit. Zwei Dinge solltest du wissen: GoCardless-Konten haben <b>keine Beleg-Anhänge</b> wie Qonto — der Beleg-Status kommt dort komplett aus dem Drive-Abgleich (Betrag + Datum im Dateinamen) und der Dauerbeleg-Liste. Und das Free-Tier erlaubt <b>4 Abrufe pro Konto und Tag</b> — der tägliche Check (1×) und der Monatsreport (1×) passen locker rein, häufige manuelle Testläufe können das Tageslimit aber aufbrauchen.</p>
         </article>
 
       </div>
+
+      <div class="section-head reveal" style="margin-top:64px;margin-bottom:0">
+        <p class="eyebrow">Die gängigsten Geschäftskonten</p>
+        <h2 style="font-size:clamp(1.5rem,2.6vw,2rem)">Deine Bank in der Übersicht</h2>
+        <p class="sub">Alle hier gelisteten Banken sind in GoCardless verfügbar; die meisten lassen sich alternativ in Qonto per Konto-Aggregation verbinden (die Verfügbarkeit zeigt dir Qonto direkt im Verbinden-Dialog). Der Suchbegriff gilt für <code class="fn">gocardlessBankSuchen()</code>.</p>
+      </div>
+      <div class="bank-grid">
+        <div class="bank reveal">
+          <div class="bank-row"><span class="bank-tile"><img src="logos/sparkasse.svg" alt="Sparkasse" loading="lazy"></span><b>Sparkasse</b></div>
+          <p>Jede Sparkasse ist eine <b>eigene Institution</b> — such nach deinem Ort („Sparkasse/Kreissparkasse/Stadtsparkasse + Stadt"). Freigabe per S-pushTAN-App.</p>
+        </div>
+        <div class="bank reveal">
+          <div class="bank-row"><span class="bank-tile"><img src="logos/volksbank.svg" alt="Volksbanken Raiffeisenbanken" loading="lazy"></span><b>Volksbank / Raiffeisenbank</b></div>
+          <p>Ebenfalls regional — such nach dem Namen deiner VR-Bank. Freigabe per VR SecureGo plus.</p>
+        </div>
+        <div class="bank reveal">
+          <div class="bank-row"><span class="bank-tile"><img src="logos/deutsche-bank.svg" alt="Deutsche Bank" loading="lazy"></span><b>Deutsche Bank</b></div>
+          <p>Suchbegriff <code>deutsche bank</code>. Freigabe per BestSign-App (löst photoTAN ab).</p>
+        </div>
+        <div class="bank reveal">
+          <div class="bank-row"><span class="bank-tile"><img src="logos/commerzbank.svg" alt="Commerzbank" loading="lazy"></span><b>Commerzbank</b></div>
+          <p>Suchbegriff <code>commerzbank</code>, Freigabe per photoTAN. Eigenheit: Die Autorisierung verlangt den Bank-Login teils <b>zweimal hintereinander</b> — nicht abbrechen, das ist normal.</p>
+        </div>
+        <div class="bank reveal">
+          <div class="bank-row"><span class="bank-tile"><img src="logos/postbank.svg" alt="Postbank" loading="lazy"></span><b>Postbank</b></div>
+          <p>Suchbegriff <code>postbank</code> — den Deutschland-Eintrag wählen. Freigabe per BestSign-App.</p>
+        </div>
+        <div class="bank reveal">
+          <div class="bank-row"><span class="bank-tile"><img src="logos/n26.svg" alt="N26" loading="lazy"></span><b>N26</b></div>
+          <p>Suchbegriff <code>n26</code>. Freigabe direkt in der N26-App — kein separates TAN-Verfahren.</p>
+        </div>
+        <div class="bank reveal">
+          <div class="bank-row"><span class="bank-tile"><img src="logos/ing.svg" alt="ING" loading="lazy"></span><b>ING</b></div>
+          <p>Suchbegriff <code>ing</code>. Freigabe in der App „Banking to go". Geschäftskonten bietet die ING vor allem für Selbstständige.</p>
+        </div>
+        <div class="bank reveal">
+          <div class="bank-row"><span class="bank-tile"><img src="logos/dkb.svg" alt="DKB" loading="lazy"></span><b>DKB</b></div>
+          <p>Suchbegriff <code>dkb</code>. Freigabe in der DKB-App.</p>
+        </div>
+        <div class="bank reveal">
+          <div class="bank-row"><span class="bank-tile"><img src="logos/revolut.svg" alt="Revolut" loading="lazy"></span><b>Revolut Business</b></div>
+          <p>Suchbegriff <code>revolut</code> — bei deutscher IBAN den DE-Eintrag wählen. Freigabe in der Revolut-App.</p>
+        </div>
+        <div class="bank reveal">
+          <div class="bank-row"><span class="bank-tile"><img src="logos/bunq.svg" alt="bunq" loading="lazy"></span><b>bunq</b></div>
+          <p>Suchbegriff <code>bunq</code> — ein Eintrag für alle Länder. Freigabe in der bunq-App.</p>
+        </div>
+        <div class="bank reveal">
+          <div class="bank-row"><span class="bank-tile"><img src="logos/finom.svg" alt="Finom" loading="lazy"></span><b>Finom</b></div>
+          <p>Suchbegriff <code>finom</code> — den aktuellen Finom-Eintrag nehmen, nicht den Alt-Eintrag „Finom (Solaris)". Freigabe per Finom-App.</p>
+        </div>
+        <div class="bank reveal">
+          <div class="bank-row"><span class="bank-tile"><img src="logos/qonto.svg" alt="Qonto" loading="lazy"></span><b>Qonto</b></div>
+          <p>Braucht keinen Adapter — läuft nativ über die Business API, inklusive Beleg-Anhängen direkt an den Transaktionen.</p>
+        </div>
+      </div>
+      <p class="trademark-note reveal">Alle Bank- und Markennamen sowie Logos gehören ihren jeweiligen Inhabern und dienen ausschließlich der Kompatibilitäts-Angabe — es besteht keine Partnerschaft mit oder Empfehlung durch die genannten Institute.</p>
+
       <div class="flow-note reveal">
         <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6.5" width="18" height="11" rx="1.6"/><circle cx="12" cy="12" r="2.4"/><path d="M6.5 9.5v5M17.5 9.5v5"/></svg>Und Bargeld?</h3>
         <p>Papierbelege scannst du einfach in den Drive-Ordner und hängst manuell <b>_Kasse</b> an den Dateinamen — der Abgleich toleriert das Suffix.</p>
@@ -800,7 +1002,7 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
         <li class="reveal"><b>Apps-Script-Projekt erstellen</b><p>Öffne <code>script.google.com</code>, lege ein neues Projekt an und kopiere <code>Code.gs</code> und <code>appsscript.json</code> aus dem Repo hinein.</p></li>
         <li class="reveal"><b>CONFIG ausfüllen</b><p>Mindestens <code>DRIVE_FOLDER_ID</code> — der Rest nach Bedarf. Jede Automatik aktiviert sich nur, wenn ihr Key gesetzt ist (z.&nbsp;B. <code>ANTHROPIC_API_KEY</code>, <code>QONTO_API_LOGIN/SECRET</code>, <code>SLACK_WEBHOOK_URL</code>).</p></li>
         <li class="reveal"><b><code>setup()</code> ausführen</b><p>Einmal im Apps-Script-Editor starten, Google-OAuth bestätigen — danach stehen alle Zeit-Trigger automatisch.</p></li>
-        <li class="reveal"><b>Qonto verbinden</b><p>API-Key in Qonto erzeugen (Einstellungen → Integrationen &amp; Partner → API-Schlüssel) und deine AMEX-Karten per Konto-Aggregation verbinden.</p></li>
+        <li class="reveal"><b>Deine Bank verbinden</b><p><b>Mit Qonto:</b> API-Key erzeugen (Einstellungen → Integrationen &amp; Partner → API-Schlüssel) und AMEX-Karten sowie Fremdbanken per Konto-Aggregation verbinden. <b>Ohne Qonto:</b> GoCardless-Secrets anlegen und deine Konten per <code>gocardlessVerbinden()</code> koppeln — Anleitung in der <a href="#banken">Banken-Sektion</a>.</p></li>
         <li class="reveal"><b>Slack einrichten</b><p>Slack-App mit Incoming Webhook anlegen und die Member-IDs deines Teams für die @-Mentions in die CONFIG eintragen.</p></li>
         <li class="reveal"><b>Optional: GMI, lexoffice, DATEV</b><p>GetMyInvoices für Portal-Rechnungen, lexoffice für Ausgangsrechnungen, DATEV-Upload-Mail-Adressen für die Weitergabe an die Buchhaltung.</p></li>
         <li class="reveal"><b>Optional: weitere Postfächer</b><p>Installiere dieselbe Datei in zusätzlichen Postfächern. Über die geteilte Hash-Datei (Drive-Freigabe) erkennen sich alle Installationen — Duplikate sind ausgeschlossen.</p></li>
@@ -833,9 +1035,13 @@ durch die Einrichtung — immer nur ein Schritt, warte jeweils auf mein Okay:
 3. Die CONFIG gemeinsam ausfüllen — erkläre mir zu jedem Feld, wo ich den Wert
    herbekomme. Wichtig: API-Keys und Secrets trage ICH selbst ein.
 4. setup() ausführen und die Google-Freigaben bestätigen.
-5. Qonto: API-Schlüssel anlegen, meine Kreditkarten und Fremdbank-Konten per
-   Konto-Aggregation verbinden, dann per Testlauf prüfen, dass alle Konten
-   gefunden werden (externe Konten kommen über GET /v2/bank_accounts!).
+5. Meine Bank verbinden — frag mich zuerst, welche ich nutze:
+   a) Qonto: API-Schlüssel anlegen, Kreditkarten und Fremdbank-Konten per
+      Konto-Aggregation verbinden, dann per Testlauf prüfen, dass alle Konten
+      gefunden werden (externe Konten kommen über GET /v2/bank_accounts!).
+   b) Andere Bank (Sparkasse, Volksbank, N26, DKB …): GoCardless-Secrets
+      anlegen, meine Bank per gocardlessBankSuchen() finden und mit
+      gocardlessVerbinden() koppeln.
 6. Optional einrichten, je nachdem was ich nutze: Slack-Webhook, GetMyInvoices,
    lexoffice-Ausgangsrechnungen, DATEV Upload-Mail.
 
@@ -874,9 +1080,25 @@ benannt in Google Drive liegt.</pre>
         <details class="reveal">
           <summary>Was brauche ich mindestens?<span class="plus" aria-hidden="true"></span></summary>
           <div class="answer">
-            <p><b>Pflicht:</b> ein Google-Konto (Gmail/Workspace) und ein Drive-Ordner (<code>DRIVE_FOLDER_ID</code>).</p>
+            <p><b>Pflicht:</b> ein Google-Konto — Gmail, Drive und Apps Script sind überall enthalten. Dazu ein Drive-Ordner (<code>DRIVE_FOLDER_ID</code>). Das war's für die Kernfunktion.</p>
             <p><b>Empfohlen:</b> ein Anthropic-API-Key für die KI-Benennung und ein Slack-Webhook für die Erinnerungen. <b>Für Beleg-Check und Monatsreport:</b> Qonto-API-Zugang oder ein beliebiges Bankkonto via GoCardless — plus die BelegCheck-Spreadsheet-ID.</p>
             <p><b>Optional:</b> GetMyInvoices, lexoffice-API-Key, DATEV-Upload-Adressen. Jede Automatik startet nur, wenn ihr Key gesetzt ist — du kannst also mit der reinen Gmail-Ablage beginnen.</p>
+          </div>
+        </details>
+
+        <details class="reveal">
+          <summary>Reicht ein kostenloses Google-Konto oder brauche ich Workspace?<span class="plus" aria-hidden="true"></span></summary>
+          <div class="answer">
+            <p>Ein <b>kostenloses Google-Konto reicht technisch völlig</b> — Apps Script, Gmail und Drive funktionieren dort genauso.</p>
+            <p><b>Google Workspace</b> lohnt sich für Firmen: eigene Domain, mehrere Postfächer (billing@, buchhaltung@ …), zentrale Verwaltung. Der Agent läuft dann in jedem Postfach als eigene Installation, und alle teilen sich über die gemeinsame Hash-Datei denselben Drive-Ordner — ohne Duplikate.</p>
+          </div>
+        </details>
+
+        <details class="reveal">
+          <summary>Brauche ich ein Qonto-Konto?<span class="plus" aria-hidden="true"></span></summary>
+          <div class="answer">
+            <p><b>Nein — aber es ist der empfohlene Weg.</b> Qonto liefert Beleg-Anhänge direkt an den Transaktionen und holt AMEX plus deine Hausbank per Konto-Aggregation in eine einzige API; der kleinste Tarif genügt, deine Hausbank bleibt bestehen.</p>
+            <p>Alternativ läuft der Beleg-Check über den eingebauten <b>GoCardless-Adapter</b> mit praktisch jeder deutschen Bank (Sparkasse, Volksbank, Deutsche Bank, N26, DKB&nbsp;…) — dafür brauchst du allerdings einen GoCardless-Bestandszugang, denn Neuanmeldungen sind dort derzeit ausgesetzt. Und ganz ohne Bank-Anbindung bleibt immer noch die komplette Mail-, Portal- und Ablage-Automatik — nur der automatische Abgleich gegen Abbuchungen entfällt.</p>
           </div>
         </details>
 
@@ -925,8 +1147,9 @@ benannt in Google Drive liegt.</pre>
 <footer class="site-footer">
   <div class="container footer-inner">
     <div>
-      <div class="footer-brand">Ein Projekt von ADMKRS</div>
-      <div class="footer-meta">Performance-Marketing-Agentur, München · gebaut für die eigene Buchhaltung, geteilt für deine.</div>
+      <svg class="flogo" viewBox="0 0 1362.2 191.2" fill="currentColor" aria-label="ADMKRS"><path d="M97.6,5.4L0,185.8h33.5l80.9-153.9l80.9,153.9H229L131.7,5.4H97.6z M323.4,5.4H218.6l13.4,27.2l30.9-0.1h58.2c47.4,0,80.4,21.4,80.4,63.1c0,41.7-33,63.1-80.4,63.1h-18.2l-44.3,0.1l13.4,27h51.4c67,0,109.8-34.5,109.8-90.2C433.2,39.9,390.4,5.4,323.4,5.4z M579,108.7L495.3,5.4h-37.5l119.7,146.1h1.8l85.8-104.1v138.4H696V5.4h-33.2L579,108.7z M905.5,5.4h-41.7l-122.6,98.9v33.8L795,94.6l78.1,91.2h37.9L818.5,76.5L905.5,5.4z M1133.2,62.9c0-37.4-30.9-57.5-72.9-57.5l-92.6,1.2v27l90.5-1.1c25.8,0,43.3,8.2,43.3,30.7c0,22.4-17.5,30.7-43.3,30.7l-90.5,0.9l0,26.2l76.9-0.5l55.9,65.4h38.1l-58.5-67C1111.6,113.1,1133.2,94,1133.2,62.9z M1266.9,79.1c-39.4-3.1-69.6-6.4-69.6-25.5c0-20.1,34-27.1,62.6-26.8c29.9,0.3,55.4,8,73.9,24.2l19.6-21.1c-21.6-18.3-54.9-29.9-94-29.9c-51.8,0-93.3,19.8-93.3,55.7c0,36.8,46.9,47.9,96.6,52c45.3,3.9,68,8.8,68,27.3c0,18.8-22.2,29.4-62.3,29.4l-1.3,26.8c61.3,0,95.1-24.5,95.1-58.7C1362.2,94.8,1323.1,83.5,1266.9,79.1z"/></svg>
+      <div class="footer-meta">Ein Projekt von ADMKRS — Performance-Marketing-Agentur, München · gebaut für die eigene Buchhaltung, geteilt für deine.</div>
+      <div class="footer-meta" style="margin-top:8px">Alle genannten Marken, Bank- und Produktnamen sowie Logos gehören ihren jeweiligen Inhabern und dienen ausschließlich der Kompatibilitäts-Angabe — keine Partnerschaft oder Empfehlung durch die Anbieter.</div>
     </div>
     <div class="footer-links">
       <a href="https://github.com/Burakaz/rechnungs-agent">GitHub-Repo →</a>

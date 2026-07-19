@@ -1,6 +1,34 @@
 # Rechnungs-Agent
 
-Ein vollautomatisches Beleg-System für kleine Firmen und Freelancer — komplett auf Google-Apps-Script-Basis. Es läuft serverlos in deinem Google-Konto (kein eigener Rechner, kein Hosting), scannt dein Gmail-Postfach nach Rechnungen, lässt eine KI die Metadaten auslesen, legt jedes PDF sauber benannt in Google Drive ab, leitet offene Rechnungen zur Zahlungsfreigabe an Qonto weiter, mahnt fehlende Belege per Slack an und baut am Monatsende den fertigen BelegCheck-Report für die Buchhaltung. Ziel: Am Monatsende liegen alle Belege vollständig, geprüft und einheitlich benannt bereit — ohne dass jemand Rechnungen zusammensucht.
+**Dein Google Workspace wird zum vollautomatischen Beleg-System — mit jeder Bank.**
+
+Der Rechnungs-Agent läuft serverlos in deinem eigenen Google-Konto (kein Rechner, kein Hosting, kein fremdes SaaS): Er scannt deine Gmail-Postfächer nach Rechnungen, lässt eine KI die Metadaten auslesen, legt jedes PDF sauber benannt in Google Drive ab, leitet offene Rechnungen zur Zahlungsfreigabe weiter, mahnt fehlende Belege per Slack an und baut am Monatsende den fertigen BelegCheck-Report für die Buchhaltung. Ziel: Am Monatsende liegen alle Belege vollständig, geprüft und einheitlich benannt bereit — ohne dass jemand Rechnungen zusammensucht.
+
+## Das Fundament: Google Workspace
+
+Der Agent ist kein fremdes Tool, sondern ein Skript in deinem eigenen Google-Konto — vier Bausteine, die du schon hast:
+
+| Baustein | Rolle |
+|----------|-------|
+| **Gmail** | Der Eingang: Jede Rechnungs-Mail wird stündlich erkannt — über beliebig viele Postfächer hinweg (Inhaber-Adresse, billing@ …), ohne Duplikate |
+| **Apps Script** | Der Motor: Googles kostenlose Automatisierungs-Umgebung führt den Agent per Zeit-Trigger aus — serverlos, eine einzige Skript-Datei |
+| **Drive** | Das Archiv: Jeder Beleg sauber benannt unter Jahr/Monat, Eingangs- und Ausgangsrechnungen getrennt |
+| **Sheets** | Der Report: Am 1. des Monats stehen die fertigen BelegCheck-Tabs für die Buchhaltung bereit |
+
+Zum Start genügt ein **kostenloses Google-Konto** — mit **Google Workspace** (eigene Domain, mehrere Postfächer, zentrale Verwaltung) spielt das System seine ganze Stärke aus. Keine Server, keine Zwischenhändler: Deine Daten und API-Keys bleiben bei dir.
+
+## Lückenlos: jede Beleg-Quelle abgedeckt
+
+Belege entstehen an sechs verschiedenen Stellen — für jede hat der Agent einen Weg:
+
+| Quelle | Weg |
+|--------|-----|
+| Rechnungen per E-Mail | `processInvoices()` — stündlich, KI-benannt, abgelegt |
+| Portal-Rechnungen ohne Mail (Amazon Business, Webflow …) | `pullGmiDocuments()` via GetMyInvoices |
+| Karten- & Kontoabbuchungen | `checkMissingReceipts()` — täglich geprüft, fehlende per Slack angemahnt |
+| Eigene Ausgangsrechnungen | `pullLexofficeInvoices()` aus Lexware Office |
+| Papier- & Barbelege | In den Drive-Ordner scannen, `_Kasse` anhängen |
+| Dauerbelege (Leasing, Miete, Finanzamt, Gehälter …) | `DAUERBELEG_MUSTER` — Vertrag ersetzt Monatsbeleg, wird nie angemahnt |
 
 ## Was es kann
 
@@ -39,7 +67,7 @@ Die Slack-Erinnerungen sind bewusst zurückhaltend: frühestens 3 Tage nach der 
 
 - **Google-Konto bzw. Google Workspace** — Gmail, Drive und Apps Script (script.google.com). Mehr braucht die Kernfunktion nicht.
 - **Anthropic-API-Key** (empfohlen) — für die KI-Klassifizierung und saubere Benennung. Ohne Key arbeitet der Agent nur mit deinen Absenderlisten.
-- **Qonto-Geschäftskonto oder ein beliebiges Bankkonto via GoCardless** (optional) — für den täglichen Beleg-Check und den Monatsreport. AMEX-Firmenkarten lassen sich in Qonto per Konto-Aggregation anbinden; praktisch jede andere Bank bindet der eingebaute GoCardless-Adapter direkt an (siehe [Welche Banken funktionieren?](#welche-banken-funktionieren)).
+- **Qonto-Geschäftskonto oder ein GoCardless-Bestandszugang** (optional) — für den täglichen Beleg-Check und den Monatsreport. AMEX-Firmenkarten und deine Hausbank lassen sich in Qonto per Konto-Aggregation anbinden; alternativ bindet der eingebaute GoCardless-Adapter praktisch jede Bank direkt an (siehe [Welche Banken funktionieren?](#welche-banken-funktionieren) — inklusive ehrlichem Status-Hinweis zu GoCardless-Neuanmeldungen).
 - **Slack** (optional, empfohlen) — für Benachrichtigungen und Erinnerungen. Ohne Slack-Webhook läuft der tägliche Beleg-Check nicht.
 - **GetMyInvoices** (optional) — für Portale, die keine Rechnungs-Mails verschicken.
 - **Lexware Office** (optional) — für die Ausgangsrechnungs-Ablage.
@@ -52,7 +80,7 @@ Kein Server, kein Cronjob, kein Deployment — alles läuft in Google-Triggern.
 2. **Apps-Script-Projekt anlegen.** Gehe auf [script.google.com](https://script.google.com), erstelle ein neues Projekt und füge `Code.gs` ein. Aktiviere unter Projekteinstellungen „Manifestdatei anzeigen" und ersetze den Inhalt von `appsscript.json` durch die Datei aus diesem Repo.
 3. **CONFIG ausfüllen.** Mindestens `DRIVE_FOLDER_ID` — alles andere nach Bedarf. Jede Automatik aktiviert sich nur, wenn ihr Key gesetzt ist; leere Felder (`''`) schalten die jeweilige Funktion einfach ab.
 4. **`setup()` ausführen.** Wähle im Editor die Funktion `setup` und klicke „Ausführen". Google fragt einmalig nach den OAuth-Berechtigungen (Gmail, Drive, externe Anfragen) — bestätigen. Danach stehen alle Trigger, die Gmail-Labels sind angelegt, die Hash-Datei ist initialisiert und der erste Lauf startet sofort.
-5. **Qonto anbinden** (optional). API-Schlüssel erzeugen (Qonto → Einstellungen → Integrationen & Partner → API-Schlüssel) und deine AMEX-Karten per Konto-Aggregation verbinden (Qonto → Konten → externes Konto verbinden).
+5. **Deine Bank anbinden** (optional). **Mit Qonto:** API-Schlüssel erzeugen (Qonto → Einstellungen → Integrationen & Partner → API-Schlüssel) und AMEX-Karten sowie Fremdbanken per Konto-Aggregation verbinden (Qonto → Konten → externes Konto verbinden). **Ohne Qonto:** GoCardless-Secrets in die CONFIG und deine Konten per `gocardlessVerbinden()` koppeln — Details und Bank-Übersicht unter [Welche Banken funktionieren?](#welche-banken-funktionieren).
 6. **Slack anbinden** (optional). Slack-App mit Incoming Webhook erstellen, Webhook-URL in die CONFIG, und die Slack-Member-IDs deiner Kollegen in `AMEX_KARTEN` bzw. `BELEG_ZUSTAENDIG` eintragen (Member-ID: Slack-Profil → „…" → „Mitglieder-ID kopieren").
 7. **Optionale Quellen anbinden.** GetMyInvoices-Key, Lexware-Office-Key und/oder DATEV-Upload-Adressen in die CONFIG — jeweils `setup()` erneut ausführen, damit die zugehörigen Trigger angelegt werden.
 8. **Weitere Postfächer** (optional). Installiere dieselbe Datei in zusätzlichen Postfächern (z. B. `billing@`) — über die geteilte Hash-Datei im Drive-Ordner entstehen keine Duplikate. Details im Abschnitt [Mehrpostfach-Betrieb](#mehrpostfach-betrieb).
@@ -74,9 +102,13 @@ durch die Einrichtung — immer nur ein Schritt, warte jeweils auf mein Okay:
 3. Die CONFIG gemeinsam ausfüllen — erkläre mir zu jedem Feld, wo ich den Wert
    herbekomme. Wichtig: API-Keys und Secrets trage ICH selbst ein.
 4. setup() ausführen und die Google-Freigaben bestätigen.
-5. Qonto: API-Schlüssel anlegen, meine Kreditkarten und Fremdbank-Konten per
-   Konto-Aggregation verbinden, dann per Testlauf prüfen, dass alle Konten
-   gefunden werden (externe Konten kommen über GET /v2/bank_accounts!).
+5. Meine Bank verbinden — frag mich zuerst, welche ich nutze:
+   a) Qonto: API-Schlüssel anlegen, Kreditkarten und Fremdbank-Konten per
+      Konto-Aggregation verbinden, dann per Testlauf prüfen, dass alle Konten
+      gefunden werden (externe Konten kommen über GET /v2/bank_accounts!).
+   b) Andere Bank (Sparkasse, Volksbank, N26, DKB …): GoCardless-Secrets
+      anlegen, meine Bank per gocardlessBankSuchen() finden und mit
+      gocardlessVerbinden() koppeln.
 6. Optional einrichten, je nachdem was ich nutze: Slack-Webhook, GetMyInvoices,
    lexoffice-Ausgangsrechnungen, DATEV Upload-Mail.
 
@@ -138,16 +170,42 @@ Drei weitere Fallen, die dich sonst Stunden kosten:
 
 ## Welche Banken funktionieren?
 
-- **Qonto (nativ):** Direkt per API integriert — täglicher Beleg-Check, Monatsreport und die Weiterleitung offener Lieferantenrechnungen zur Zahlungsfreigabe.
-- **Finom, N26, Sparkasse, Volksbank, DKB, Commerzbank, weitere Karten … (über Qonto):** Alles, was du in Qonto per Konto-Aggregation verbindest, sieht der Agent automatisch mit — externe Konten laufen durch dieselbe Logik wie die AMEX-Karten (`is_external_account`). Ein Qonto-Konto als Zentrale genügt also, um praktisch jede in Deutschland übliche Bank einzubinden.
-- **Ohne Qonto: GoCardless (eingebaut):** Der Agent bindet über GoCardless Bank Account Data (kostenlose PSD2-Schnittstelle, 2.000+ europäische Banken — Sparkasse, Volksbank, DKB, Commerzbank, N26, Finom, Holvi …) beliebige Firmenkonten direkt ein — ganz ohne Qonto, oder zusätzlich dazu. Gematchte Belege bekommen das Suffix `_Bank-<Kontoname>`.
+Zwei Wege, praktisch jede deutsche Bank — deine Hausbank musst du dafür nicht wechseln:
+
+- **Weg A — Qonto als Zentrale (empfohlen):** Qonto ist nativ per API integriert (täglicher Beleg-Check, Monatsreport, Weiterleitung offener Lieferantenrechnungen zur Freigabe — inklusive Beleg-Anhängen direkt an den Transaktionen). Alles Weitere verbindest du in Qonto per **Konto-Aggregation**: AMEX-Firmenkarten, Sparkasse, Volksbank, DKB, Commerzbank und weitere laufen dann durch dieselbe Logik wie externe Konten (`is_external_account`). Der kleinste Qonto-Tarif genügt als Zentrale.
+- **Weg B — GoCardless-Adapter (eingebaut):** Der Agent bindet über GoCardless Bank Account Data (kostenlose PSD2-Schnittstelle, 2.000+ europäische Banken) beliebige Firmenkonten direkt ein — ohne Qonto oder zusätzlich dazu. Gematchte Belege bekommen das Suffix `_Bank-<Kontoname>`.
+  > [!WARNING]
+  > **Ehrlicher Status (Juli 2026):** GoCardless nimmt für Bank Account Data derzeit **keine Neuanmeldungen** an ([new-signups-disabled](https://bankaccountdata.gocardless.com/new-signups-disabled)). Bestandszugänge laufen weiter, der Adapter bleibt eingebaut und startklar. Ohne Bestandszugang ist Weg A die verlässliche Route.
+- **AMEX Business:** Nur über Weg A — GoCardless führt American Express für Deutschland nicht (nur GB/FR). Dafür ist bei AMEX-Business-Karten **GetMyInvoices als Partnervorteil enthalten** (kostenloser Plan: 40 Belege/Monat, bis zu 10 Portal-Verbindungen) — genau der Zugang, den `pullGmiDocuments()` nutzt.
 - **Bargeld/Kasse:** Papierbelege scannst du in den Drive-Ordner und hängst manuell `_Kasse` an den Dateinamen — der Abgleich toleriert das Suffix.
+
+### Die gängigsten Geschäftskonten im Detail
+
+Alle folgenden sind in GoCardless verfügbar (Suchbegriff für `gocardlessBankSuchen()`); die meisten lassen sich alternativ in Qonto per Konto-Aggregation verbinden — die Verfügbarkeit zeigt dir Qonto im Verbinden-Dialog.
+
+| Bank | Suchbegriff | Freigabe per | Wissenswert |
+|------|-------------|--------------|-------------|
+| Sparkasse | `sparkasse` + dein Ort | S-pushTAN-App | Jede Sparkasse ist eine **eigene Institution** (Sparkasse/Kreissparkasse/Stadtsparkasse + Stadt) |
+| Volksbank / Raiffeisenbank | Name deiner VR-Bank | VR SecureGo plus | Ebenfalls regional — nach dem lokalen Namen suchen |
+| Deutsche Bank | `deutsche bank` | BestSign-App | BestSign löst photoTAN ab |
+| Commerzbank | `commerzbank` | photoTAN | Autorisierung verlangt den Bank-Login teils **zweimal hintereinander** — nicht abbrechen |
+| Postbank | `postbank` | BestSign-App | Den Deutschland-Eintrag wählen |
+| N26 | `n26` | N26-App | Kein separates TAN-Verfahren |
+| ING | `ing` | „Banking to go" | Geschäftskonten vor allem für Selbstständige |
+| DKB | `dkb` | DKB-App | — |
+| Revolut Business | `revolut` | Revolut-App | Bei deutscher IBAN den DE-Eintrag wählen |
+| bunq | `bunq` | bunq-App | Ein Eintrag für alle Länder |
+| Finom | `finom` | Finom-App | Den aktuellen Eintrag nehmen, nicht den Alt-Eintrag „Finom (Solaris)" |
+| Kontist | `kontist` | Solaris-Flow | Nur Geschäftskonten |
+| Qonto | — | — | Braucht keinen Adapter: läuft nativ über die Business API |
 
 ### So richtest du GoCardless ein
 
-1. Kostenlosen Account auf [bankaccountdata.gocardless.com](https://bankaccountdata.gocardless.com) anlegen, unter Developers → User secrets ein Secret erstellen und `GOCARDLESS_SECRET_ID`/`GOCARDLESS_SECRET_KEY` in die CONFIG eintragen.
-2. Im Apps-Script-Editor `gocardlessBankSuchen('sparkasse')` ausführen — die Institution-IDs stehen im Log.
-3. `gocardlessVerbinden('INSTITUTION_ID')` ausführen und den Link aus dem Log/Slack öffnen — einmal bei der Bank anmelden. Der Zugriff gilt bis zu 180 Tage, danach einfach neu verbinden.
+Voraussetzung: ein bestehender Bank-Account-Data-Zugang auf [bankaccountdata.gocardless.com](https://bankaccountdata.gocardless.com) (siehe Status-Hinweis oben).
+
+1. Unter Developers → User secrets ein Secret erstellen und `GOCARDLESS_SECRET_ID`/`GOCARDLESS_SECRET_KEY` in die CONFIG eintragen.
+2. Im Apps-Script-Editor `gocardlessBankSuchen('sparkasse')` ausführen — die Institution-IDs stehen im Log (Suchbegriffe pro Bank: Tabelle oben).
+3. `gocardlessVerbinden('INSTITUTION_ID')` ausführen und den Link aus dem Log/Slack öffnen — einmal bei der Bank anmelden und per TAN-App freigeben. Der Zugriff gilt je nach Bank **90–180 Tage**, danach einfach neu verbinden.
 
 Ab dann laufen die Konten automatisch im täglichen Beleg-Check und Monatsreport mit. Zwei Dinge solltest du wissen:
 
@@ -208,7 +266,7 @@ Gesammelt aus mehreren Monaten Betrieb — damit du sie nicht selbst finden muss
 | Qonto Business API | Im Qonto-Konto enthalten |
 | Slack Incoming Webhook | 0 € |
 | lexoffice Public API | Im Lexware-Office-Tarif enthalten |
-| GetMyInvoices | Eigener Tarif je nach Portal- und Dokumentenzahl (nur falls du GMI nutzt) |
+| GetMyInvoices | Bei AMEX-Business-Karten als Partnervorteil **inklusive** (40 Belege/Monat, bis zu 10 Portale) — sonst eigener Tarif je nach Portal- und Dokumentenzahl |
 
 ## FAQ
 
@@ -217,6 +275,9 @@ Nein, niemals. Offene Rechnungen werden nur an die Qonto-Lieferantenrechnungs-In
 
 **Brauche ich Qonto, Slack und die KI zwingend?**
 Nein. Die Kernfunktion (Gmail → Drive mit sauberer Benennung) braucht nur die `DRIVE_FOLDER_ID`. Jede weitere Automatik schaltet sich erst zu, wenn du ihren Key setzt.
+
+**Reicht ein kostenloses Google-Konto oder brauche ich Workspace?**
+Ein kostenloses Google-Konto reicht technisch völlig — Apps Script, Gmail und Drive funktionieren dort genauso. Google Workspace lohnt sich für Firmen: eigene Domain, mehrere Postfächer (billing@ …), zentrale Verwaltung. Der Agent läuft dann in jedem Postfach als eigene Installation, alle teilen sich über die gemeinsame Hash-Datei denselben Drive-Ordner.
 
 **Was passiert ohne Anthropic-API-Key?**
 Der Agent arbeitet dann nur mit deinen Absenderlisten (`DIENSTLEISTER_DOMAINS`, `BELEG_DOMAINS`). Mails von unbekannten Absendern mit Rechnungs-Stichwort landen im Prüf-Label — die feine Benennung mit Anbieter, Nummer und Betrag entfällt.
