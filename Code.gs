@@ -86,6 +86,17 @@ const CONFIG = {
     '67890': { name: 'Lisa', slack: 'U0YYYYYYYYY' },
   },
 
+  // Fallback-Standardkonto pro Anbieter: Läuft ein Anbieter IMMER über dasselbe
+  // Konto (z. B. Amazon Business → AMEX), wird der Beleg auch OHNE bestätigte
+  // Buchung so getaggt und in AMEX/QONTO einsortiert. Der Schlüssel muss im
+  // Anbieter-Teil des Dateinamens vorkommen (case-insensitiv); der Wert ist das
+  // Konto-Suffix (AMEX-<Name> oder Qonto-<Kontoname>). Das BelegCheck-Sheet
+  // bleibt die zahlungs-genaue Quelle – der Tag ist reine Organisation.
+  KONTO_FALLBACK: {
+    // 'amazon': 'AMEX-Max', 'anthropic': 'AMEX-Max', 'adobe': 'AMEX-Max',
+    // 'personio': 'Qonto-Hauptkonto', 'ionos': 'Qonto-Hauptkonto',
+  },
+
   // Belegpflicht nach Händler – ÜBERSCHREIBT den Karteninhaber. Wer sammelt die
   // Rechnung dieses Anbieters, egal auf welcher Karte/Konto sie läuft?
   // (Match: Muster kommt im Transaktions-Label vor, case-insensitiv.)
@@ -976,6 +987,45 @@ function sortiereBelege_() {
       });
     });
   });
+  // Nachlauf: eindeutige Anbieter ohne bestätigte Buchung per Fallback zuordnen
+  try { fallbackKontoSortierung_(); } catch (e) { /* nie blockieren */ }
+}
+
+// Belege des laufenden Monats, die benannt aber (mangels Buchung) ungetaggt sind,
+// per CONFIG.KONTO_FALLBACK (Anbieter → Standardkonto) taggen + einsortieren.
+function fallbackKontoSortierung_() {
+  const map = CONFIG.KONTO_FALLBACK || {};
+  const keys = Object.keys(map);
+  if (!keys.length) return;
+  const now = new Date();
+  const floor = new Date(CONFIG.BELEGPFLICHT_AB || '2026-07-01');
+  if (new Date(now.getFullYear(), now.getMonth(), 1).getTime() <
+      new Date(floor.getFullYear(), floor.getMonth(), 1).getTime()) return;
+  const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+  const ym = Utilities.formatDate(now, 'Europe/Berlin', 'yyyy-MM');
+  const yIt = root.getFoldersByName(ym.slice(0, 4));
+  if (!yIt.hasNext()) return;
+  const mIt = yIt.next().getFoldersByName(ym);
+  if (!mIt.hasNext()) return;
+  const mo = mIt.next();
+  const files = mo.getFiles();
+  while (files.hasNext()) {
+    const f = files.next();
+    if (f.getMimeType() !== 'application/pdf') continue;
+    // nur Convention-Namen OHNE Konto-Suffix (getaggte matchen die Regex nicht)
+    const m = f.getName().match(/^\d{4}-\d{2}-\d{2}_(.+?)_\d+(?:\.\d+)?[A-Za-z]{3}(?:_\d+)?\.pdf$/i);
+    if (!m) continue;
+    const vendor = m[1].toLowerCase();
+    let tag = null;
+    for (const key of keys) { if (vendor.indexOf(key.toLowerCase()) !== -1) { tag = map[key]; break; } }
+    if (!tag) continue;
+    try {
+      f.setName(f.getName().replace(/\.pdf$/i, '_' + tag + '.pdf'));
+      const subName = /^AMEX/i.test(tag) ? 'AMEX' : 'QONTO';
+      const it = mo.getFoldersByName(subName);
+      f.moveTo(it.hasNext() ? it.next() : mo.createFolder(subName));
+    } catch (e) { /* nie blockieren */ }
+  }
 }
 
 // Manuell ausführbar: Juli/aktuellen Monat sofort in AMEX/QONTO einsortieren
