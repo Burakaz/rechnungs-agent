@@ -56,6 +56,7 @@ Fünf Automatiken, jede mit eigenem Trigger. Jede aktiviert sich nur, wenn ihr A
 | 3 | `monthlyBelegReport` | 1. des Monats, 7 Uhr | Erzeugt im BelegCheck-Spreadsheet der Buchhalterin zwei Tabs für den Vormonat — einen für die Qonto-Konten, einen für AMEX — mit vorbefüllten BELEG-Checkboxen. Existierende Tabs werden nie überschrieben (der tägliche Check hält sie danach aktuell). |
 | 4 | `pullGmiDocuments` | stündlich (optional) | Holt Plattform-Rechnungen über die GetMyInvoices-API — Portale wie Amazon Business oder Webflow, deren Rechnungen **nie per Mail kommen** — und legt sie mit derselben Naming-Convention in Drive ab. |
 | 5 | `pullLexofficeInvoices` | stündlich (optional) | Zieht deine eigenen **Ausgangsrechnungen** und Gutschriften (keine Entwürfe) aus Lexware Office (lexoffice Public API) in den getrennten Drive-Baum `Ausgangsrechnungen/<Jahr>/<YYYY-MM>/`. |
+| 6 | `processDriveUploads` | stündlich | Legst du (oder wer auch immer) ein PDF **von Hand in den Drive-Rechnungsordner** (z. B. eine Portal-Rechnung aus der manuellen Liste), liest Claude es aus, benennt es nach der Naming-Convention, verschiebt es in den richtigen Monatsordner und sortiert es anschließend in `AMEX/` bzw. `QONTO/`. Bereits benannte Dateien werden übersprungen. |
 
 Dazu kommt `backfillNames()` — eine einmalig ausführbare KI-Nachbenennung für Bestands-PDFs, die schon in deinem Drive-Ordner liegen. Fertige Dateien bekommen einen Marker in der Dateibeschreibung, du kannst die Funktion also beliebig oft wiederholen, bis alles durch ist.
 

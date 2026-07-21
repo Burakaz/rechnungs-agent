@@ -136,6 +136,12 @@ function setup() {
   });
   ScriptApp.newTrigger('processInvoices').timeBased().everyHours(1).create();
   ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'processDriveUploads') ScriptApp.deleteTrigger(t);
+  });
+  if (CONFIG.ANTHROPIC_API_KEY) {
+    ScriptApp.newTrigger('processDriveUploads').timeBased().everyHours(1).create();
+  }
+  ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'checkMissingReceipts') ScriptApp.deleteTrigger(t);
   });
   if (CONFIG.QONTO_API_SECRET || CONFIG.GOCARDLESS_SECRET_ID) {
@@ -1342,6 +1348,108 @@ function kontoTag_(acc) {
     return 'AMEX-' + sanitize(inhaber ? inhaber.name : suffix);
   }
   return 'Qonto-' + sanitize(acc.name || 'Konto');
+}
+
+// ---------------------------------------------------------------------------
+// Manuelle Drive-Uploads (stündlich): jemand legt ein PDF von Hand in den
+// Rechnungsordner (Root oder Monatsordner). Claude liest es, benennt es nach
+// der Naming-Convention und setzt den Marker; Root-Uploads wandern in den
+// richtigen Monatsordner. Danach werden die neuen Belege einsortiert (Konto-Tag
+// + AMEX/QONTO). Bereits benannte oder markierte Dateien werden übersprungen.
+// ---------------------------------------------------------------------------
+function processDriveUploads() {
+  if (!CONFIG.ANTHROPIC_API_KEY) return;
+  const MARKER = 'rechnungs-agent:benannt';
+  const startTime = Date.now();
+  const MAX_RUNTIME_MS = 270 * 1000;
+  const conv = /^\d{4}-\d{2}-\d{2}_.+_\d+(?:\.\d+)?[A-Za-z]{3}(?:_\d+)?(?:_(?:Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*)?\.pdf$/i;
+  const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+  const now = new Date();
+
+  // Kandidaten-Ordner: Root + aktueller & Vormonat (dort landen Uploads)
+  const folders = [{ f: root, isRoot: true }];
+  [0, -1].forEach(off => {
+    const ym = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth() + off, 1),
+      'Europe/Berlin', 'yyyy-MM');
+    const yIt = root.getFoldersByName(ym.slice(0, 4));
+    if (!yIt.hasNext()) return;
+    const mIt = yIt.next().getFoldersByName(ym);
+    if (mIt.hasNext()) folders.push({ f: mIt.next(), isRoot: false });
+  });
+
+  let neu = 0, fehler = 0;
+  outer:
+  for (const entry of folders) {
+    const files = entry.f.getFiles();
+    while (files.hasNext()) {
+      if (Date.now() - startTime > MAX_RUNTIME_MS) break outer;
+      const f = files.next();
+      if (f.getMimeType() !== 'application/pdf') continue;
+      const nm = f.getName();
+      if (conv.test(nm)) {
+        // Schon benannt – falls versehentlich im Root, in den Monatsordner legen
+        if (entry.isRoot) verschiebeInMonat_(root, f, nm.slice(0, 7));
+        continue;
+      }
+      if ((f.getDescription() || '').indexOf('rechnungs-agent:') !== -1) continue;
+      try {
+        const meta = extractFromPdf_(f.getBlob());
+        if (!meta) { fehler++; continue; }
+        if (!meta.ist_rechnung) { f.setDescription('rechnungs-agent:kein-beleg'); continue; }
+        const ymd = /^\d{4}-\d{2}-\d{2}$/.test(meta.rechnungsdatum || '')
+          ? meta.rechnungsdatum
+          : Utilities.formatDate(f.getDateCreated(), 'Europe/Berlin', 'yyyy-MM-dd');
+        const vendor = sanitize(meta.anbieter || 'Unbekannt');
+        const nummer = meta.rechnungsnummer ? '_' + sanitize(meta.rechnungsnummer) : '';
+        const amount = meta.betrag ? '_' + meta.betrag + (meta.waehrung || 'EUR') : '';
+        const ziel = monatsOrdner_(root, ymd.slice(0, 7));
+        const name = eindeutigerName_(ziel, ymd + '_' + vendor + nummer + amount + '.pdf', f.getId());
+        if (f.getName() !== name) f.setName(name);
+        f.setDescription(MARKER);
+        if (f.getParents().next().getId() !== ziel.getId()) f.moveTo(ziel);
+        neu++;
+      } catch (e) {
+        console.warn('Upload-Verarbeitung fehlgeschlagen bei ' + nm + ': ' + e);
+        fehler++;
+      }
+    }
+  }
+
+  if (neu) {
+    try { sortiereBelege_(); } catch (e) { /* Sortieren darf nie blockieren */ }
+    notifySlack(':inbox_tray: *' + neu + ' manuell hochgeladene' +
+      (neu === 1 ? 'r Beleg' : ' Belege') + ' erkannt, benannt und einsortiert.*' +
+      (fehler ? ' (' + fehler + ' konnten nicht gelesen werden)' : ''));
+  }
+}
+
+// Monatsordner <Jahr>/<YYYY-MM> holen oder anlegen
+function monatsOrdner_(root, ym) {
+  const yIt = root.getFoldersByName(ym.slice(0, 4));
+  const y = yIt.hasNext() ? yIt.next() : root.createFolder(ym.slice(0, 4));
+  const mIt = y.getFoldersByName(ym);
+  return mIt.hasNext() ? mIt.next() : y.createFolder(ym);
+}
+
+// Datei in den Monatsordner ihres Datums verschieben (best effort)
+function verschiebeInMonat_(root, f, ym) {
+  try {
+    const ziel = monatsOrdner_(root, ym);
+    if (f.getParents().next().getId() !== ziel.getId()) f.moveTo(ziel);
+  } catch (e) { /* darf nichts blockieren */ }
+}
+
+// Eindeutigen Dateinamen im Zielordner finden (hängt _2, _3 … an bei Kollision)
+function eindeutigerName_(folder, name, selfId) {
+  const base = name.replace(/\.pdf$/i, '');
+  let candidate = name, n = 2;
+  for (;;) {
+    const it = folder.getFilesByName(candidate);
+    let clash = false;
+    while (it.hasNext()) { if (it.next().getId() !== selfId) { clash = true; break; } }
+    if (!clash) return candidate;
+    candidate = base + '_' + (n++) + '.pdf';
+  }
 }
 
 // ---------------------------------------------------------------------------
