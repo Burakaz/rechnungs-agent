@@ -952,11 +952,16 @@ function sortiereBelege_() {
   [0, -1].forEach(off => {
     const ms = new Date(now.getFullYear(), now.getMonth() + off, 1);
     if (ms.getTime() < floorMonth.getTime()) return;
-    const me = new Date(ms.getFullYear(), ms.getMonth() + 1, 1);
-    const driveMap = driveDocMap_(ms);   // eigener Map je Monat (1:1-Verbrauch)
+    // Breites Transaktionsfenster ab 20 Tage vor Monatsanfang: Zahlungen liegen
+    // oft vor dem Rechnungsdatum (AMEX-Autorisierung) oder im Vormonat.
+    const txFrom = new Date(ms.getTime() - 20 * 86400000);
+    const txTo = new Date(Math.min(now.getTime(),
+      new Date(ms.getFullYear(), ms.getMonth() + 1, 1).getTime() + 10 * 86400000));
+    const driveMap = driveDocMap_(ms, true);   // nur Dateien DIESES Monatsordners (1:1-Verbrauch)
     konten.forEach(acc => {
       if (acc.status === 'closed') return;
-      const txs = kontoTransaktionen_(acc, ms.toISOString(), me.toISOString());
+      const txs = kontoTransaktionen_(acc, txFrom.toISOString(), txTo.toISOString());
+      txs.sort((a, b) => new Date(a.settled_at || a.emitted_at) - new Date(b.settled_at || b.emitted_at));
       txs.forEach(t => {
         const betrag = (t.side === 'debit' ? -1 : 1) * (t.amount || 0);
         if (betrag >= 0) return;   // nur Abbuchungen tragen einen Eingangsbeleg
@@ -1251,10 +1256,10 @@ function gmiHasDoc_(map, amountAbs, dateMs) {
 // Zahlungskonto als Suffix an den Dateinamen gehängt (_Qonto-<Konto> bzw.
 // _AMEX-<Inhaber>); ein manuelles _Kasse-Suffix wird ebenfalls toleriert.
 // ---------------------------------------------------------------------------
-function driveDocMap_(monthStart) {
+function driveDocMap_(monthStart, exactOnly) {
   const entries = [];
   const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
-  [-1, 0, 1].forEach(off => {
+  (exactOnly ? [0] : [-1, 0, 1]).forEach(off => {
     const ym = Utilities.formatDate(
       new Date(monthStart.getFullYear(), monthStart.getMonth() + off, 1),
       'Europe/Berlin', 'yyyy-MM');
