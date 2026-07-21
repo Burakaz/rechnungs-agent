@@ -180,6 +180,8 @@ function checkMissingReceipts() {
     // angezeigten Berlin-Datum, daher rutschen keine Alt-Positionen rein
     const from = new Date(Math.max(now.getTime() - 35 * 86400000,
       new Date(floorStr).getTime() - 2 * 86400000));
+    // Zuerst alle Belege in die Konto-Unterordner AMEX/QONTO einsortieren + taggen
+    try { sortiereBelege_(); } catch (e) { console.warn('Sortieren fehlgeschlagen: ' + e); }
     const driveMap = driveDocMap_(new Date(now.getFullYear(), now.getMonth(), 1));
     const props = PropertiesService.getScriptProperties();
     const reminders = JSON.parse(props.getProperty('belegReminders') || '{}');
@@ -231,6 +233,11 @@ function checkMissingReceipts() {
       if (now.getTime() - (reminders[k].last || 0) > 60 * 86400000) delete reminders[k];
     });
     props.setProperty('belegReminders', JSON.stringify(reminders));
+
+    // BelegCheck-Sheet des laufenden Monats bei jedem Check aktuell halten
+    try { updateBelegSheets_(); } catch (e) {
+      console.warn('Sheet-Update fehlgeschlagen: ' + e);
+    }
 
     if (missing.length === 0) return;
     let text = ':receipt: *' + missing.length + ' Abbuchung' + (missing.length === 1 ? '' : 'en') +
@@ -769,7 +776,7 @@ function classifyWithClaude(message, pdf) {
     'Antworte NUR mit einem JSON-Objekt, ohne Markdown:\n' +
     '{"ist_rechnung": true|false,\n' +
     ' "status": "offen"|"bezahlt"|"unklar",  // "offen" = muss noch überwiesen werden (Zahlungsziel, IBAN, "zahlbar bis"); "bezahlt" = bereits per Lastschrift/Kreditkarte beglichen\n' +
-    ' "anbieter": "Firmenname (kurz, ohne Rechtsform-Zusätze wie GmbH wenn möglich)",\n' +
+    ' "anbieter": "der RECHNUNGSSTELLER/Aussteller/Lieferant — die Firma, die die Rechnung stellt und das Geld bekommt, NIEMALS der Empfänger/Kunde. Der Kunde ist fast immer ADMKRS (ADMKRS GmbH) — ADMKRS also NIE als anbieter. Kurz, ohne Rechtsform-Zusätze wie GmbH wenn möglich",\n' +
     ' "rechnungsnummer": "RE-2026-123 oder null",\n' +
     ' "betrag": "123.45", "waehrung": "EUR",\n' +
     ' "rechnungsdatum": "YYYY-MM-DD", "faelligkeit": "YYYY-MM-DD oder null"}';
@@ -928,8 +935,45 @@ function belegReportAktuellerMonat() {
   buildBelegReport(new Date(now.getFullYear(), now.getMonth(), 1));
 }
 
-function buildBelegReport(monthStart) {
-  if (!CONFIG.QONTO_API_SECRET) return;
+// ---------------------------------------------------------------------------
+// Sortiert die Drive-Belege des laufenden + Vormonats in die Konto-Unterordner
+// AMEX/ bzw. QONTO/ ein und hängt den Konto-Tag an den Dateinamen. Matcht JEDE
+// Abbuchung gegen ihren Drive-Beleg – auch wenn die Rechnung bereits als Anhang
+// in Qonto hängt (der Beleg-Check überspringt solche Transaktionen sonst, sodass
+// die Drive-Kopie ungetaggt bliebe). Idempotent: getaggte Dateien werden nicht
+// erneut angefasst.
+// ---------------------------------------------------------------------------
+function sortiereBelege_() {
+  if (!CONFIG.QONTO_API_SECRET && !CONFIG.GOCARDLESS_SECRET_ID) return;
+  const now = new Date();
+  const floor = new Date(CONFIG.BELEGPFLICHT_AB || '2026-07-01');
+  const floorMonth = new Date(floor.getFullYear(), floor.getMonth(), 1);
+  const konten = alleBankKonten_();
+  [0, -1].forEach(off => {
+    const ms = new Date(now.getFullYear(), now.getMonth() + off, 1);
+    if (ms.getTime() < floorMonth.getTime()) return;
+    const me = new Date(ms.getFullYear(), ms.getMonth() + 1, 1);
+    const driveMap = driveDocMap_(ms);   // eigener Map je Monat (1:1-Verbrauch)
+    konten.forEach(acc => {
+      if (acc.status === 'closed') return;
+      const txs = kontoTransaktionen_(acc, ms.toISOString(), me.toISOString());
+      txs.forEach(t => {
+        const betrag = (t.side === 'debit' ? -1 : 1) * (t.amount || 0);
+        if (betrag >= 0) return;   // nur Abbuchungen tragen einen Eingangsbeleg
+        const datum = new Date(t.settled_at || t.emitted_at);
+        driveHasDoc_(driveMap, Math.abs(betrag), datum.getTime(), t.label, kontoTag_(acc));
+      });
+    });
+  });
+}
+
+// Manuell ausführbar: Juli/aktuellen Monat sofort in AMEX/QONTO einsortieren
+function belegeSortieren() {
+  sortiereBelege_();
+}
+
+// Berechnet die Soll-Zeilen beider Tabs für einen Monat (ohne Sheet-Zugriff)
+function berechneBelegRows_(monthStart) {
   const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
   const fromIso = monthStart.toISOString();
   const toIso = monthEnd.toISOString();
@@ -982,12 +1026,25 @@ function buildBelegReport(monthStart) {
   qontoRows.forEach((r, i) => r[0] = i + 1);
   amexRows.forEach((r, i) => r[0] = i + 1);
 
+  return {
+    qontoTabName: qontoTabName, amexTabName: amexTabName,
+    qontoHeader: ['Index', 'BELEG', 'Wertstellung', 'Buchung', 'Gegenpartei', 'Transaktionsart',
+      'Verwendungszweck', 'Betrag', 'Währung', 'Konto', 'Anhänge in Qonto'],
+    amexHeader: ['Index', 'BELEG', 'Datum', 'Händler', 'Verwendungszweck', 'Betrag', 'Währung', 'Karte'],
+    qontoRows: qontoRows, amexRows: amexRows,
+  };
+}
+
+function buildBelegReport(monthStart) {
+  if (!CONFIG.QONTO_API_SECRET) return;
+  const m = monthStart.getMonth(), y = monthStart.getFullYear();
+  const d = berechneBelegRows_(monthStart);
+  const qontoTabName = d.qontoTabName, amexTabName = d.amexTabName;
+  const qontoRows = d.qontoRows, amexRows = d.amexRows;
+
   const ss = SpreadsheetApp.openById(CONFIG.BELEGCHECK_SHEET_ID);
-  const w1 = writeBelegTab_(ss, qontoTabName,
-    ['Index', 'BELEG', 'Wertstellung', 'Buchung', 'Gegenpartei', 'Transaktionsart',
-     'Verwendungszweck', 'Betrag', 'Währung', 'Konto', 'Anhänge in Qonto'], qontoRows);
-  const w2 = writeBelegTab_(ss, amexTabName,
-    ['Index', 'BELEG', 'Datum', 'Händler', 'Verwendungszweck', 'Betrag', 'Währung', 'Karte'], amexRows);
+  const w1 = writeBelegTab_(ss, qontoTabName, d.qontoHeader, qontoRows);
+  const w2 = writeBelegTab_(ss, amexTabName, d.amexHeader, amexRows);
 
   const fehltQ = qontoRows.filter(r => r[1] === false).length;
   const fehltA = amexRows.filter(r => r[1] === false).length;
@@ -997,6 +1054,103 @@ function buildBelegReport(monthStart) {
     '• ' + amexTabName + ': ' + (amexRows.length - fehltA) + '/' + amexRows.length +
     ' Belege da' + (w2 ? '' : ' (Tab existierte schon – NICHT überschrieben)') + '\n' +
     (fehltQ + fehltA > 0 ? ':point_right: ' + (fehltQ + fehltA) + ' offene Belege – Details im Sheet.' : ':tada: Alles vollständig!'));
+}
+
+// ---------------------------------------------------------------------------
+// Tägliches Sheet-Update: hält die BelegCheck-Tabs des LAUFENDEN Monats aktuell.
+// Neue Transaktionen werden unten angehängt; offene BELEG-Checkboxen werden
+// gesetzt, sobald der Beleg inzwischen da ist. Häkchen werden NIE entfernt —
+// was die Buchhalterin (oder ein früherer Lauf) abgehakt hat, bleibt abgehakt.
+// Abgleich über Datum+Betrag+Text als Multiset (mehrere gleiche Buchungen pro
+// Tag, z. B. Anthropic-Kleinstbeträge, werden korrekt gezählt).
+// ---------------------------------------------------------------------------
+function updateBelegSheets_() {
+  if (!CONFIG.BELEGCHECK_SHEET_ID || !CONFIG.QONTO_API_SECRET) return;
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const floor = new Date(CONFIG.BELEGPFLICHT_AB || '2026-07-01');
+  if (monthStart.getTime() < new Date(floor.getFullYear(), floor.getMonth(), 1).getTime()) return;
+
+  const d = berechneBelegRows_(monthStart);
+  const ss = SpreadsheetApp.openById(CONFIG.BELEGCHECK_SHEET_ID);
+  const changes = [];
+
+  [{ name: d.qontoTabName, header: d.qontoHeader, rows: d.qontoRows, amex: false },
+   { name: d.amexTabName, header: d.amexHeader, rows: d.amexRows, amex: true }].forEach(tab => {
+    const sh = ss.getSheetByName(tab.name);
+    if (!sh) {
+      writeBelegTab_(ss, tab.name, tab.header, tab.rows);
+      changes.push(tab.name + ': neu angelegt (' + tab.rows.length + ' Zeilen)');
+      return;
+    }
+    // Datum kann als String ODER Date-Objekt aus dem Sheet kommen
+    const normDate = v => (v instanceof Date)
+      ? Utilities.formatDate(v, 'Europe/Berlin', 'dd.MM.yyyy') : String(v || '').trim();
+    const keyOf = r => normDate(r[2]) + '|' +
+      Number(tab.amex ? r[5] : r[7]).toFixed(2) + '|' +
+      String(tab.amex ? r[3] : r[4]).trim();
+
+    const lastRow = sh.getLastRow();
+    const existing = lastRow > 1 ? sh.getRange(2, 1, lastRow - 1, tab.header.length).getValues() : [];
+    const exist = {};        // key -> [{sheetRow, checked}]
+    existing.forEach((r, i) => {
+      const k = keyOf(r);
+      (exist[k] = exist[k] || []).push({ sheetRow: i + 2, checked: r[1] === true });
+    });
+
+    // Pass 1: neue Transaktionen finden (Multiset-Konsum)
+    const budget = {};       // key -> noch nicht zugeordnete Sheet-Zeilen
+    Object.keys(exist).forEach(k => budget[k] = exist[k].length);
+    const toAppend = [];
+    const matchedTrue = {};  // key -> Soll-"Beleg da"-Anzahl unter den GEMATCHTEN Zeilen
+    tab.rows.forEach(r => {
+      const k = keyOf(r);
+      if (budget[k] > 0) {
+        budget[k]--;
+        if (r[1] === true) matchedTrue[k] = (matchedTrue[k] || 0) + 1;
+      } else {
+        toAppend.push(r);
+      }
+    });
+
+    // Pass 2: Checkboxen nachziehen (nur unchecked -> checked, nie umgekehrt)
+    let checkedNow = 0;
+    Object.keys(matchedTrue).forEach(k => {
+      const rowsK = exist[k] || [];
+      const sheetTrue = rowsK.filter(x => x.checked).length;
+      let delta = matchedTrue[k] - sheetTrue;
+      rowsK.forEach(x => {
+        if (delta > 0 && !x.checked) {
+          sh.getRange(x.sheetRow, 2).setValue(true);
+          delta--; checkedNow++;
+        }
+      });
+    });
+
+    // Pass 3: neue Zeilen anhängen (Index fortlaufend)
+    if (toAppend.length) {
+      toAppend.forEach((r, i) => r[0] = existing.length + i + 1);
+      const startRow = lastRow + 1;
+      sh.getRange(startRow, 1, toAppend.length, tab.header.length).setValues(toAppend);
+      sh.getRange(startRow, 2, toAppend.length, 1).insertCheckboxes();
+      // insertCheckboxes setzt frisch eingefügte Kästchen auf false → true-Werte nachziehen
+      toAppend.forEach((r, i) => {
+        if (r[1] === true) sh.getRange(startRow + i, 2).setValue(true);
+      });
+    }
+    if (toAppend.length || checkedNow) {
+      changes.push(tab.name + ': +' + toAppend.length + ' neu, ' + checkedNow + ' abgehakt');
+    }
+  });
+
+  if (changes.length) {
+    notifySlack(':bar_chart: *BelegCheck aktualisiert*\n' + changes.map(c => '• ' + c).join('\n'));
+  }
+}
+
+// Manuell ausführbar: BelegCheck-Tabs sofort auf den neuesten Stand bringen
+function belegSheetsAktualisieren() {
+  updateBelegSheets_();
 }
 
 // Legt den Tab NEU an; existiert er bereits, wird nichts überschrieben (return false)
@@ -1108,14 +1262,24 @@ function driveDocMap_(monthStart) {
     if (!yIt.hasNext()) return;
     const mIt = yIt.next().getFoldersByName(ym);
     if (!mIt.hasNext()) return;
-    const files = mIt.next().getFiles();
-    while (files.hasNext()) {
-      const f = files.next();
-      const m = f.getName().match(/^(\d{4}-\d{2}-\d{2})_(.+)_(\d+(?:\.\d+)?)([A-Za-z]{3})(?:_\d+)?(?:_(?:Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*)?\.pdf$/i);
-      if (!m) continue;
-      entries.push({ time: new Date(m[1]).getTime(), vendor: m[2].toLowerCase(),
-        amount: parseFloat(m[3]), cur: m[4].toUpperCase(), used: false, file: f });
-    }
+    const monthFolder = mIt.next();
+    // Monatsordner-Root plus die Konto-Unterordner AMEX/QONTO scannen
+    const scanFolders = [monthFolder];
+    ['AMEX', 'QONTO'].forEach(sub => {
+      const it = monthFolder.getFoldersByName(sub);
+      if (it.hasNext()) scanFolders.push(it.next());
+    });
+    scanFolders.forEach(sf => {
+      const files = sf.getFiles();
+      while (files.hasNext()) {
+        const f = files.next();
+        const m = f.getName().match(/^(\d{4}-\d{2}-\d{2})_(.+)_(\d+(?:\.\d+)?)([A-Za-z]{3})(?:_\d+)?(?:_(?:Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*)?\.pdf$/i);
+        if (!m) continue;
+        entries.push({ time: new Date(m[1]).getTime(), vendor: m[2].toLowerCase(),
+          amount: parseFloat(m[3]), cur: m[4].toUpperCase(), used: false,
+          file: f, monthFolder: monthFolder, inSub: sf.getId() !== monthFolder.getId() });
+      }
+    });
   });
   return entries;
 }
@@ -1142,14 +1306,22 @@ function driveHasDoc_(entries, amountAbs, dateMs, label, kontoTag) {
   });
   if (best) {
     best.e.used = true;
-    // Zahlungskonto in den Dateinamen taggen (einmalig, best effort)
+    // Zahlungskonto in den Dateinamen taggen und die Datei in den passenden
+    // Konto-Unterordner (AMEX/ bzw. QONTO/) des Monatsordners einsortieren
     if (kontoTag && best.e.file) {
       try {
         const nm = best.e.file.getName();
         if (!/_(Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*\.pdf$/i.test(nm)) {
           best.e.file.setName(nm.replace(/\.pdf$/i, '_' + kontoTag + '.pdf'));
         }
-      } catch (e) { /* Umbenennen darf den Abgleich nie blockieren */ }
+        const subName = /^AMEX/i.test(kontoTag) ? 'AMEX' : (/^Qonto/i.test(kontoTag) ? 'QONTO' : null);
+        if (subName && !best.e.inSub && best.e.monthFolder) {
+          const it = best.e.monthFolder.getFoldersByName(subName);
+          const sub = it.hasNext() ? it.next() : best.e.monthFolder.createFolder(subName);
+          best.e.file.moveTo(sub);
+          best.e.inSub = true;
+        }
+      } catch (e) { /* Umbenennen/Verschieben darf den Abgleich nie blockieren */ }
     }
     return true;
   }
@@ -1237,7 +1409,7 @@ function extractFromPdf_(blob) {
     'ist_rechnung=false NUR bei reinen Anschreiben, Verträgen, AGB, Mahnungen ohne Betrag o.Ä. ' +
     'Antworte NUR mit einem JSON-Objekt, ohne Markdown:\n' +
     '{"ist_rechnung": true|false,\n' +
-    ' "anbieter": "Firmenname (kurz, ohne Rechtsform-Zusätze wie GmbH wenn möglich)",\n' +
+    ' "anbieter": "der RECHNUNGSSTELLER/Aussteller/Lieferant — die Firma, die die Rechnung stellt und das Geld bekommt, NIEMALS der Empfänger/Kunde. Der Kunde ist fast immer ADMKRS (ADMKRS GmbH) — ADMKRS also NIE als anbieter. Kurz, ohne Rechtsform-Zusätze wie GmbH wenn möglich",\n' +
     ' "rechnungsnummer": "RE-2026-123 oder null",\n' +
     ' "betrag": "123.45",\n' +
     ' "waehrung": "EUR",\n' +

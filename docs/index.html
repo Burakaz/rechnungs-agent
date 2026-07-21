@@ -751,6 +751,7 @@
           <p>Holt alle Qonto-Konten inklusive der per Konto-Aggregation verbundenen <b>AMEX-Karten</b> und prüft jede Abbuchung der letzten 35 Tage: Beleg vorhanden? Zählt als Beleg: Qonto-Anhang <b>oder</b> passendes Drive-PDF <b>oder</b> Dauerbeleg.</p>
           <p>Fehlende Belege landen als Sammelmeldung in Slack. Bei AMEX-Karten wird der Karteninhaber per <b>@-Mention</b> erinnert (Mapping: letzte 5 Ziffern der Kartennummer → Person + Slack-ID). Händlerbasierte Zuständigkeit überschreibt den Karteninhaber — Meta Ads geht immer an den Marketing-Verantwortlichen, egal wessen Karte belastet wurde.</p>
           <p>Reminder-Logik: frühestens <b>3 Tage nach Buchung</b>, maximal <b>2×</b>, mindestens 3 Tage Abstand — und sie verstummt automatisch, sobald der Beleg da ist.</p>
+          <p>Bei jedem Lauf hält der Check außerdem das <b>BelegCheck-Sheet des laufenden Monats aktuell</b> (neue Buchungen anhängen, vorhandene Belege abhaken — Häkchen werden nie entfernt) und sortiert jeden gematchten Beleg in den <b>Konto-Unterordner</b> <code class="fn">AMEX/</code> bzw. <code class="fn">QONTO/</code>.</p>
         </article>
 
         <article class="card reveal">
@@ -1029,6 +1030,7 @@ lokalesDatum(datum, <span class="k">"Europe/Berlin"</span>)</code></pre>
         <div class="panel panel-wide reveal">
           <h3>Der Konto-Tag: entsteht erst beim Abgleich</h3>
           <p style="margin:0;font-size:.94rem;color:var(--soft)">Sobald der tägliche Beleg-Check ein PDF einer Abbuchung zuordnet, hängt der Agent das Zahlungskonto automatisch als Suffix an den Dateinamen: <code>_Qonto-&lt;Kontoname&gt;</code> bei Qonto-Konten, <code>_AMEX-&lt;Inhaber&gt;</code> bei Kreditkarten (der Name kommt aus dem <code>AMEX_KARTEN</code>-Mapping), <code>_Bank-&lt;Kontoname&gt;</code> bei GoCardless-Konten. Früher geht das nicht — beim Ablegen weiß noch niemand, von welchem Konto die Rechnung später abgebucht wird. Für Barbelege hängst du manuell <code>_Kasse</code> an; der Abgleich toleriert das Suffix.</p>
+          <p style="margin:12px 0 0;font-size:.94rem;color:var(--soft)">Im selben Zug wandert der Beleg in den passenden <b>Konto-Unterordner</b> des Monats — <code>AMEX/</code> für Kreditkarten, <code>QONTO/</code> für Bankkonten. So liegt am Monatsende jeder Beleg sauber benannt <b>und</b> nach Konto getrennt bereit.</p>
         </div>
       </div>
     </div>
