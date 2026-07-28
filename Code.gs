@@ -159,6 +159,12 @@ function setup() {
     ScriptApp.newTrigger('checkMissingReceipts').timeBased().everyDays(1).atHour(9).create();
   }
   ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'belegSheetsAktualisieren') ScriptApp.deleteTrigger(t);
+  });
+  if (CONFIG.BELEGCHECK_SHEET_ID && (CONFIG.QONTO_API_SECRET || CONFIG.GOCARDLESS_SECRET_ID)) {
+    ScriptApp.newTrigger('belegSheetsAktualisieren').timeBased().everyDays(1).atHour(8).create();
+  }
+  ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'pullGmiDocuments') ScriptApp.deleteTrigger(t);
   });
   if (CONFIG.GMI_API_KEY) {

@@ -730,7 +730,7 @@
     <div class="container">
       <div class="section-head reveal">
         <p class="eyebrow">Was im Hintergrund läuft</p>
-        <h2>Fünf Automatiken, ein Ziel: nichts fehlt</h2>
+        <h2>Sieben Automatiken, ein Ziel: nichts fehlt</h2>
         <p class="sub">Jede Automatik ist ein eigener Zeit-Trigger. Sie aktiviert sich nur, wenn ihr API-Key in der CONFIG gesetzt ist — du startest also klein und schaltest dazu, was du brauchst.</p>
       </div>
       <div class="cards">
@@ -755,6 +755,22 @@
         </article>
 
         <article class="card reveal">
+        <article class="card reveal">
+          <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4v5h-5"/></svg></span>
+          <div class="card-top"><code class="fn">belegSheetsAktualisieren()</code><span class="badge">Täglich 8 Uhr</span></div>
+          <h3>Sheet immer auf Stand</h3>
+          <p>Schreibt die BelegCheck-Tabs des <b>laufenden Monats</b> jeden Morgen fort: neue Buchungen werden unten angehängt, BELEG-Häkchen gesetzt, sobald der Beleg da ist.</p>
+          <p>Gesetzte Häkchen werden <b>nie entfernt</b> — was die Buchhaltung abgehakt hat, bleibt abgehakt. So schaut man nie wieder auf einen veralteten Monat.</p>
+        </article>
+
+        <article class="card reveal">
+          <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M8.3 7.7L12 4l3.7 3.7"/><path d="M4.5 15.5v3A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5v-3"/></svg></span>
+          <div class="card-top"><code class="fn">processDriveUploads()</code><span class="badge">Stündlich</span></div>
+          <h3>Manuell abgelegte Belege</h3>
+          <p>Legt jemand ein PDF <b>von Hand in den Drive-Ordner</b> — eine Portal-Rechnung, ein <b>gescannter Bewirtungsbeleg</b> — liest Claude es aus, benennt es nach der Naming-Convention und legt es in den richtigen Monatsordner.</p>
+          <p>Anschließend wird es wie jeder andere Beleg getaggt und in <code class="fn">AMEX/</code> bzw. <code class="fn">QONTO/</code> einsortiert. Einfach reinlegen — der Rest passiert von selbst.</p>
+        </article>
+
           <span class="ic-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M9.5 9.5v10M3.5 14.5h17"/></svg></span>
           <div class="card-top"><code class="fn">monthlyBelegReport()</code><span class="badge">1. des Monats</span></div>
           <h3>Report für die Buchhalterin</h3>
