@@ -1423,14 +1423,22 @@ function processDriveUploads() {
   const now = new Date();
 
   // Kandidaten-Ordner: Root + aktueller & Vormonat (dort landen Uploads)
-  const folders = [{ f: root, isRoot: true }];
+  // Root + aktueller & Vormonat inkl. deren Konto-Unterordner (Scans landen oft
+  // direkt in AMEX/ oder QONTO/ – dort bleiben sie, bekommen aber sauberen Namen)
+  const folders = [{ f: root, isRoot: true, inSub: false }];
   [0, -1].forEach(off => {
     const ym = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth() + off, 1),
       'Europe/Berlin', 'yyyy-MM');
     const yIt = root.getFoldersByName(ym.slice(0, 4));
     if (!yIt.hasNext()) return;
     const mIt = yIt.next().getFoldersByName(ym);
-    if (mIt.hasNext()) folders.push({ f: mIt.next(), isRoot: false });
+    if (!mIt.hasNext()) return;
+    const mf = mIt.next();
+    folders.push({ f: mf, isRoot: false, inSub: false });
+    ['AMEX', 'QONTO', 'Sonstiges'].forEach(sub => {
+      const it = mf.getFoldersByName(sub);
+      if (it.hasNext()) folders.push({ f: it.next(), isRoot: false, inSub: true });
+    });
   });
 
   let neu = 0, fehler = 0;
@@ -1458,11 +1466,13 @@ function processDriveUploads() {
         const vendor = sanitize(meta.anbieter || 'Unbekannt');
         const nummer = meta.rechnungsnummer ? '_' + sanitize(meta.rechnungsnummer) : '';
         const amount = meta.betrag ? '_' + meta.betrag + (meta.waehrung || 'EUR') : '';
-        const ziel = monatsOrdner_(root, ymd.slice(0, 7));
+        // Liegt die Datei schon in einem Konto-Unterordner, bleibt sie dort –
+        // nur der Name wird korrigiert; den Konto-Tag hängt der Abgleich an.
+        const ziel = entry.inSub ? entry.f : monatsOrdner_(root, ymd.slice(0, 7));
         const name = eindeutigerName_(ziel, ymd + '_' + vendor + nummer + amount + '.pdf', f.getId());
         if (f.getName() !== name) f.setName(name);
         f.setDescription(MARKER);
-        if (f.getParents().next().getId() !== ziel.getId()) f.moveTo(ziel);
+        if (!entry.inSub && f.getParents().next().getId() !== ziel.getId()) f.moveTo(ziel);
         neu++;
       } catch (e) {
         console.warn('Upload-Verarbeitung fehlgeschlagen bei ' + nm + ': ' + e);
@@ -1584,7 +1594,10 @@ function extractFromPdf_(blob) {
     ' "waehrung": "EUR",\n' +
     ' "rechnungsdatum": "YYYY-MM-DD oder null"}\n' +
     'betrag = der tatsächlich zu zahlende Endbetrag (Brutto-Summe) mit Punkt als ' +
-    'Dezimaltrenner. NIEMALS Gegenstandswert, Streitwert, Kontostand oder Zwischensummen verwenden.';
+    'Dezimaltrenner. NIEMALS Gegenstandswert, Streitwert, Kontostand oder Zwischensummen verwenden.\n' +
+    'WICHTIG zum Datum: Die Belege sind DEUTSCH. Ein Datum wie 01.07.2026 oder 01/07/2026 ' +
+    'bedeutet 1. Juli 2026 (Tag.Monat.Jahr) – NIEMALS als Monat/Tag lesen. Gib es als 2026-07-01 zurück. ' +
+    'Bei Kassenbons/Bewirtungsbelegen ist das Belegdatum das Datum des Restaurantbesuchs bzw. Einkaufs.';
   const payload = {
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 300,
