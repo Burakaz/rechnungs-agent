@@ -1354,7 +1354,7 @@ function driveDocMap_(monthStart, exactOnly) {
 function driveHasDoc_(entries, amountAbs, dateMs, label, kontoTag) {
   const token = String(label || '').toLowerCase()
     .replace(/[^a-zäöü]+/g, ' ').split(' ').filter(w => w.length >= 4)[0] || '';
-  const alias = { facebook: 'meta', celonis: 'make' }; // Celonis Inc. = make.com
+  const alias = { facebook: 'meta', celonis: 'make', realtimeboard: 'miro' }; // Celonis = make.com, RealtimeBoard = Miro
   let best = null;
   entries.forEach(e => {
     if (e.used) return;
