@@ -699,8 +699,10 @@ function processInvoices(queryOverride, ignoreProcessed) {
             !/receipt|quittung/i.test(pdf.getName())) continue;
         const hash = md5hex(pdf.getBytes());
         if (seenHashes.has(hash)) continue;
-        seenHashes.add(hash);
         savedNames.push(saveToDrive(pdf, message, result));
+        // Hash erst nach erfolgreicher Ablage merken – sonst gilt die Rechnung
+        // bei einem Teil-Crash dauerhaft als erledigt (Hash-Vergiftung)
+        seenHashes.add(hash);
       }
       if (savedNames.length === 0) {
         // Alles Duplikate – nichts abzulegen, nichts weiterzuleiten
@@ -1486,6 +1488,73 @@ function processDriveUploads() {
     notifySlack(':inbox_tray: *' + neu + ' manuell hochgeladene' +
       (neu === 1 ? 'r Beleg' : ' Belege') + ' erkannt, benannt und einsortiert.*' +
       (fehler ? ' (' + fehler + ' konnten nicht gelesen werden)' : ''));
+  }
+
+  try { entferneByteDuplikate_(); } catch (e) { /* Duplikat-Sweep darf nie blockieren */ }
+}
+
+// Byte-identische Duplikate (gleicher MD5-Hash) im aktuellen Monat in den
+// Unterordner "Duplikate" verschieben. Entsteht vor allem, wenn GMI oder ein
+// Portal dieselbe PDF ein zweites Mal liefert. Behalten wird bevorzugt die
+// Datei mit Konto-Tag, dann Nicht-GMI-Namen, sonst die älteste.
+function entferneByteDuplikate_() {
+  const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+  const ym = Utilities.formatDate(new Date(), 'Europe/Berlin', 'yyyy-MM');
+  const yIt = root.getFoldersByName(ym.slice(0, 4));
+  if (!yIt.hasNext()) return;
+  const mIt = yIt.next().getFoldersByName(ym);
+  if (!mIt.hasNext()) return;
+  const mo = mIt.next();
+  const scan = [mo];
+  ['AMEX', 'QONTO', 'Sonstiges'].forEach(n => {
+    const it = mo.getFoldersByName(n);
+    if (it.hasNext()) scan.push(it.next());
+  });
+  const all = [];
+  scan.forEach(folder => {
+    const it = folder.getFiles();
+    while (it.hasNext()) {
+      const f = it.next();
+      if (f.getMimeType() !== 'application/pdf') continue;
+      all.push({ f, name: f.getName(), size: f.getSize(), created: f.getDateCreated().getTime() });
+    }
+  });
+  // Nur Größen-Kollisionen hashen – hält den stündlichen Lauf billig
+  const bySize = {};
+  all.forEach(e => { (bySize[e.size] = bySize[e.size] || []).push(e); });
+  let dupF = null;
+  const moved = [];
+  Object.keys(bySize).forEach(s => {
+    const g = bySize[s];
+    if (g.length < 2) return;
+    const byHash = {};
+    g.forEach(e => { const h = md5hex(e.f.getBlob().getBytes()); (byHash[h] = byHash[h] || []).push(e); });
+    Object.keys(byHash).forEach(h => {
+      const dup = byHash[h];
+      if (dup.length < 2) return;
+      dup.sort((a, b) => {
+        const ta = /_(AMEX|Qonto|Bank|Kasse)/i.test(a.name) ? 0 : 1, tb = /_(AMEX|Qonto|Bank|Kasse)/i.test(b.name) ? 0 : 1;
+        if (ta !== tb) return ta - tb;
+        const ga = /GMI-Plattform/i.test(a.name) ? 1 : 0, gb = /GMI-Plattform/i.test(b.name) ? 1 : 0;
+        if (ga !== gb) return ga - gb;
+        return a.created - b.created;
+      });
+      for (let i = 1; i < dup.length; i++) {
+        try {
+          if (!dupF) {
+            const dIt = mo.getFoldersByName('Duplikate');
+            dupF = dIt.hasNext() ? dIt.next() : mo.createFolder('Duplikate');
+          }
+          dup[i].f.moveTo(dupF);
+          moved.push(dup[i].name);
+        } catch (e) { console.warn('Duplikat-Verschieben fehlgeschlagen: ' + dup[i].name + ' – ' + e); }
+      }
+    });
+  });
+  if (moved.length) {
+    notifySlack(':wastebasket: *' + moved.length + ' Byte-identische' +
+      (moved.length === 1 ? 's Duplikat' : ' Duplikate') + '* in den Duplikate-Ordner verschoben:\n• ' +
+      moved.join('\n• '));
   }
 }
 
