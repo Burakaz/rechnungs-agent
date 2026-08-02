@@ -12,6 +12,11 @@ const CONFIG = {
   // Ziel-Ordner in Google Drive (ID aus der Ordner-URL)
   DRIVE_FOLDER_ID: 'DEINE_DRIVE_ORDNER_ID',
 
+  // Scan-Eingang: Ordner, in den der Dokumentenscanner/Handy-Scans ablegt.
+  // Wird stündlich geleert – Dateien werden KI-benannt und in den
+  // Monatsordner einsortiert ('' = aus)
+  SCAN_INBOX_FOLDER_ID: '',
+
   // Qonto-Weiterleitungsadresse für Lieferantenrechnungen ('' = deaktiviert,
   // dann werden offene Rechnungen nur markiert + gemeldet)
   QONTO_FORWARD_ADDRESS: 'deine-inbox@inbox.qonto.com',
@@ -208,7 +213,7 @@ function checkMissingReceipts() {
     const driveMap = driveDocMap_(new Date(now.getFullYear(), now.getMonth(), 1));
     const props = PropertiesService.getScriptProperties();
     const reminders = JSON.parse(props.getProperty('belegReminders') || '{}');
-    const missing = [], mentions = [];
+    const missing = [], mentions = [], offen = [];
 
     alleBankKonten_().forEach(acc => {
       if (acc.status === 'closed') return;
@@ -226,29 +231,55 @@ function checkMissingReceipts() {
           delete reminders[key];
           return;
         }
-        const eintrag = Utilities.formatDate(datum, 'Europe/Berlin', 'dd.MM.') + ' ' +
-          (t.label || '?') + ' – ' + Math.abs(betrag).toFixed(2) + ' €';
-        // Zuständig: erst Händler-Regel (überschreibt Karteninhaber), dann AMEX-Inhaber
-        let person = belegZustaendig_(t.label);
-        let quelle;
-        if (acc.is_external_account) {
-          const suffix = String(acc.account_number || '').slice(-5);
-          const inhaber = (CONFIG.AMEX_KARTEN || {})[suffix];
-          quelle = inhaber ? inhaber.name : 'AMEX …' + suffix;
-          if (!person) person = inhaber;
-        } else {
-          quelle = acc.name || 'Qonto';
-        }
-        missing.push(eintrag + ' (' + quelle +
-          (person && person.name !== quelle ? ' → ' + person.name : '') + ')');
-        const r = reminders[key] || { n: 0, last: 0 };
-        if (person && now.getTime() - datum.getTime() > 3 * 86400000 &&
-            r.n < 2 && now.getTime() - r.last > 3 * 86400000) {
-          mentions.push((person.slack ? '<@' + person.slack + '>' : '*' + person.name + '*') +
-            ' ' + eintrag + (r.n === 1 ? ' _(letzte Erinnerung)_' : ''));
-          reminders[key] = { n: r.n + 1, last: now.getTime() };
-        }
+        offen.push({ betrag: Math.abs(betrag), datum: datum, label: t.label, key: key, acc: acc });
       });
+    });
+
+    // Sammelbelege: EIN Beleg deckt mehrere Abbuchungen desselben Anbieters
+    // (z. B. eine ÖPNV-Sammelrechnung über zwei Einzelfahrten).
+    // Offene Posten nach Anbieter-Token gruppieren und gegen unverbrauchte
+    // Drive-Einträge mit passender Betrags-SUMME matchen.
+    const gruppen = {};
+    offen.forEach(o => {
+      const tok = vendorToken_(o.label);
+      if (tok) (gruppen[tok] = gruppen[tok] || []).push(o);
+    });
+    Object.keys(gruppen).forEach(tok => {
+      const g = gruppen[tok];
+      if (g.length < 2) return;
+      const sum = g.reduce((s, o) => s + o.betrag, 0);
+      const hit = driveMap.filter(e => !e.used && e.cur === 'EUR' &&
+        Math.abs(e.amount - sum) < 0.005 && vendorMatch_(e.vendor, tok) &&
+        g.every(o => Math.abs(e.time - o.datum.getTime()) < 35 * 86400000))[0];
+      if (hit) {
+        hit.used = true;
+        g.forEach(o => { o.gedeckt = true; delete reminders[o.key]; });
+      }
+    });
+
+    offen.filter(o => !o.gedeckt).forEach(o => {
+      const eintrag = Utilities.formatDate(o.datum, 'Europe/Berlin', 'dd.MM.') + ' ' +
+        (o.label || '?') + ' – ' + o.betrag.toFixed(2) + ' €';
+      // Zuständig: erst Händler-Regel (überschreibt Karteninhaber), dann AMEX-Inhaber
+      let person = belegZustaendig_(o.label);
+      let quelle;
+      if (o.acc.is_external_account) {
+        const suffix = String(o.acc.account_number || '').slice(-5);
+        const inhaber = (CONFIG.AMEX_KARTEN || {})[suffix];
+        quelle = inhaber ? inhaber.name : 'AMEX …' + suffix;
+        if (!person) person = inhaber;
+      } else {
+        quelle = o.acc.name || 'Qonto';
+      }
+      missing.push(eintrag + ' (' + quelle +
+        (person && person.name !== quelle ? ' → ' + person.name : '') + ')');
+      const r = reminders[o.key] || { n: 0, last: 0 };
+      if (person && now.getTime() - o.datum.getTime() > 3 * 86400000 &&
+          r.n < 2 && now.getTime() - r.last > 3 * 86400000) {
+        mentions.push((person.slack ? '<@' + person.slack + '>' : '*' + person.name + '*') +
+          ' ' + eintrag + (r.n === 1 ? ' _(letzte Erinnerung)_' : ''));
+        reminders[o.key] = { n: r.n + 1, last: now.getTime() };
+      }
     });
 
     // Alte Reminder-Einträge aufräumen (>60 Tage)
@@ -1323,7 +1354,10 @@ function gmiHasDoc_(map, amountAbs, dateMs) {
 function driveDocMap_(monthStart, exactOnly) {
   const entries = [];
   const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
-  (exactOnly ? [0] : [-1, 0, 1]).forEach(off => {
+  // Ohne exactOnly zwei Monate zurückschauen: das 35-Tage-Fenster des
+  // Beleg-Checks überspannt am Monatsanfang bis zu zwei Monatsordner,
+  // und Rechnungsdaten liegen oft nochmal Wochen vor der Abbuchung
+  (exactOnly ? [0] : [-2, -1, 0, 1]).forEach(off => {
     const ym = Utilities.formatDate(
       new Date(monthStart.getFullYear(), monthStart.getMonth() + off, 1),
       'Europe/Berlin', 'yyyy-MM');
@@ -1353,23 +1387,41 @@ function driveDocMap_(monthStart, exactOnly) {
   return entries;
 }
 
-function driveHasDoc_(entries, amountAbs, dateMs, label, kontoTag) {
-  const token = String(label || '').toLowerCase()
+// Buchungslabel ≠ Markenname auf der Rechnung: Aliasse für den Vendor-Abgleich
+const VENDOR_ALIAS = { facebook: 'meta', celonis: 'make', realtimeboard: 'miro',
+  logpayfinan: 'transdev', logpay: 'transdev' };
+
+// Erstes aussagekräftiges Wort (≥4 Buchstaben) aus einem Buchungslabel
+function vendorToken_(label) {
+  return String(label || '').toLowerCase()
     .replace(/[^a-zäöü]+/g, ' ').split(' ').filter(w => w.length >= 4)[0] || '';
-  const alias = { facebook: 'meta', celonis: 'make', realtimeboard: 'miro' }; // Celonis = make.com, RealtimeBoard = Miro
+}
+
+function vendorMatch_(vendor, token) {
+  if (!token) return false;
+  return vendor.indexOf(token) !== -1 ||
+    (VENDOR_ALIAS[token] ? vendor.indexOf(VENDOR_ALIAS[token]) !== -1 : false);
+}
+
+function driveHasDoc_(entries, amountAbs, dateMs, label, kontoTag) {
+  const token = vendorToken_(label);
   let best = null;
   entries.forEach(e => {
     if (e.used) return;
     const dd = Math.abs(e.time - dateMs);
-    if (dd > 10 * 86400000) return;
+    const tokenOk = vendorMatch_(e.vendor, token);
+    // Enges Fenster für reine Betrags-Treffer; mit Anbieter-Match großzügig –
+    // Lastschriften laufen oft Wochen nach dem Rechnungsdatum (z. B. Fitness-Abos)
+    if (dd > (tokenOk ? 35 : 10) * 86400000) return;
     let ok = false;
     if (e.cur === 'EUR') {
       ok = Math.abs(e.amount - amountAbs) < 0.005;
-    } else if (token) {
+      // Trinkgeld-Fall (Bewirtung): die Kartenzahlung liegt bis zu 20 % über
+      // dem Bon-Betrag – nur mit Anbieter-Match zulassen
+      if (!ok && tokenOk && amountAbs > e.amount && amountAbs / e.amount <= 1.2) ok = true;
+    } else if (tokenOk) {
       const ratio = amountAbs / e.amount;
-      ok = (e.vendor.indexOf(token) !== -1 ||
-            (alias[token] && e.vendor.indexOf(alias[token]) !== -1)) &&
-           ratio > 0.7 && ratio < 1.3;
+      ok = ratio > 0.7 && ratio < 1.3;
     }
     if (ok && (!best || dd < best.dd)) best = { dd: dd, e: e };
   });
@@ -1428,6 +1480,12 @@ function processDriveUploads() {
   // Root + aktueller & Vormonat inkl. deren Konto-Unterordner (Scans landen oft
   // direkt in AMEX/ oder QONTO/ – dort bleiben sie, bekommen aber sauberen Namen)
   const folders = [{ f: root, isRoot: true, inSub: false }];
+  // Scan-Eingang (Dokumentenscanner) wie den Root behandeln: Dateien werden
+  // benannt und in den richtigen Monatsordner verschoben
+  if (CONFIG.SCAN_INBOX_FOLDER_ID) {
+    try { folders.push({ f: DriveApp.getFolderById(CONFIG.SCAN_INBOX_FOLDER_ID), isRoot: true, inSub: false }); }
+    catch (e) { /* Ordner nicht erreichbar – ignorieren */ }
+  }
   [0, -1].forEach(off => {
     const ym = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth() + off, 1),
       'Europe/Berlin', 'yyyy-MM');
