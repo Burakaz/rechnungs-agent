@@ -1406,6 +1406,9 @@ function vendorMatch_(vendor, token) {
 function driveHasDoc_(entries, amountAbs, dateMs, label, kontoTag) {
   const token = vendorToken_(label);
   let best = null;
+  // Zwei Durchläufe: exakte Treffer haben Vorrang vor der Trinkgeld-Toleranz –
+  // sonst schnappt sich eine Nachbar-Buchung desselben Anbieters den falschen Beleg
+  [false, true].some(mitTrinkgeld => {
   entries.forEach(e => {
     if (e.used) return;
     const dd = Math.abs(e.time - dateMs);
@@ -1418,12 +1421,14 @@ function driveHasDoc_(entries, amountAbs, dateMs, label, kontoTag) {
       ok = Math.abs(e.amount - amountAbs) < 0.005;
       // Trinkgeld-Fall (Bewirtung): die Kartenzahlung liegt bis zu 20 % über
       // dem Bon-Betrag – nur mit Anbieter-Match zulassen
-      if (!ok && tokenOk && amountAbs > e.amount && amountAbs / e.amount <= 1.2) ok = true;
+      if (!ok && mitTrinkgeld && tokenOk && amountAbs > e.amount && amountAbs / e.amount <= 1.2) ok = true;
     } else if (tokenOk) {
       const ratio = amountAbs / e.amount;
       ok = ratio > 0.7 && ratio < 1.3;
     }
     if (ok && (!best || dd < best.dd)) best = { dd: dd, e: e };
+  });
+  return !!best;
   });
   if (best) {
     best.e.used = true;
