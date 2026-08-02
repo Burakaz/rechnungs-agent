@@ -353,7 +353,6 @@ function pullGmiDocuments() {
           const hash = md5hex(blob.getBytes());
           done.add(uid);
           if (seen.has(hash)) continue; // kam schon per Mail o.Ä.
-          seen.add(hash);
 
           // Benennung aus GMI-Metadaten (documentDate ist gelegentlich OCR-Müll
           // → Plausibilitätscheck, sonst Abrufdatum)
@@ -370,11 +369,18 @@ function pullGmiDocuments() {
           const mIt = yearFolder.getFoldersByName(ymd.slice(0, 7));
           const monthFolder = mIt.hasNext() ? mIt.next() : yearFolder.createFolder(ymd.slice(0, 7));
           const base = ymd + '_' + vendor + nummer + betrag;
-          let name = base + '.pdf';
+          // Ohne Anbieternamen (z. B. in GMI hochgeladene Bons) keinen
+          // Convention-Namen vergeben – der Rohname lässt die KI-Benennung im
+          // nächsten processDriveUploads greifen statt "GMI-Plattform"-Kryptik
+          const hatVendor = !!d.companyName;
+          const rohBase = hatVendor ? base : 'GMI-Upload-' + uid;
+          let name = (hatVendor ? base : rohBase) + '.pdf';
           let n = 2;
-          while (monthFolder.getFilesByName(name).hasNext()) name = base + '_' + (n++) + '.pdf';
-          monthFolder.createFile(blob.copyBlob().setName(name))
-            .setDescription('rechnungs-agent:benannt');
+          while (monthFolder.getFilesByName(name).hasNext()) name = rohBase + '_' + (n++) + '.pdf';
+          const gmiFile = monthFolder.createFile(blob.copyBlob().setName(name));
+          if (hatVendor) gmiFile.setDescription('rechnungs-agent:benannt');
+          // Hash erst nach erfolgreicher Ablage merken (sonst Hash-Vergiftung bei Crash)
+          seen.add(hash);
           abgelegt.push(name);
         } catch (e) {
           console.warn('GMI-Dokument ' + uid + ' fehlgeschlagen: ' + e);
@@ -1770,4 +1776,77 @@ function storeProcessedIds(set) {
   // Nur die letzten 3000 IDs behalten (ältere Mails fallen aus dem Suchfenster)
   const arr = Array.from(set).slice(-3000);
   PropertiesService.getScriptProperties().setProperty('processed', JSON.stringify(arr));
+}
+
+
+// ---------------------------------------------------------------------------
+// Eigenbelege (Ersatzbelege): erstellt ein formales Eigenbeleg-PDF für
+// Zahlungen ohne erhältlichen Originalbeleg und legt es benannt + getaggt im
+// Monatsordner ab. Unterschrift: einmal eine Bilddatei "Unterschrift_Burak.png"
+// (weißer Hintergrund) in den Rechnungs-Root legen – sie wird ab dann in jeden
+// Eigenbeleg eingebettet; fehlt sie, bleibt eine Linie zum Unterschreiben.
+// Aufruf im Editor, z. B.:
+//   erstelleEigenbeleg('2026-07-11', 52.50, 'Muster GmbH, München',
+//     'Eintrittsticket Messe', 'Kartenzahlung Qonto Hauptkonto', 'Qonto-Hauptkonto')
+// ---------------------------------------------------------------------------
+function erstelleEigenbeleg(datumYmd, betragEur, empfaenger, zweck, zahlungsart, kontoTag, grund) {
+  const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+  grund = grund || 'Vom Zahlungsempfänger wurde kein Beleg ausgestellt bzw. der Beleg ist nicht mehr vorhanden';
+  const aussteller = CONFIG.EIGENBELEG_AUSSTELLER || 'Burak Ekin, Geschäftsführer';
+  const firma = CONFIG.EIGENBELEG_FIRMA || 'ADMKRS GmbH';
+
+  let sigHtml = '<div style="height:60px"></div>';
+  const sigIt = root.getFilesByName('Unterschrift_Burak.png');
+  if (sigIt.hasNext()) {
+    const sb = sigIt.next().getBlob();
+    sigHtml = '<img src="data:' + sb.getContentType() + ';base64,' +
+      Utilities.base64Encode(sb.getBytes()) + '" style="height:60px" />';
+  }
+
+  const dd = datumYmd.slice(8, 10) + '.' + datumYmd.slice(5, 7) + '.' + datumYmd.slice(0, 4);
+  const heute = Utilities.formatDate(new Date(), 'Europe/Berlin', 'dd.MM.yyyy');
+  const betragStr = betragEur.toFixed(2).replace('.', ',') + ' EUR';
+  const zeile = (k, v) =>
+    '<tr><td style="padding:6px 14px 6px 0;color:#666;white-space:nowrap;vertical-align:top">' + k +
+    '</td><td style="padding:6px 0;font-weight:bold">' + v + '</td></tr>';
+  const html =
+    '<html><body style="font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#111;margin:40px 48px">' +
+    '<table width="100%" style="border-bottom:2px solid #111;padding-bottom:8px"><tr>' +
+    '<td style="font-size:20px;font-weight:bold;letter-spacing:1px">EIGENBELEG</td>' +
+    '<td align="right" style="font-size:12px;color:#666">' + firma + '</td></tr></table>' +
+    '<p style="color:#666;margin:10px 0 24px">Ersatzbeleg für eine betriebliche Ausgabe ohne Originalbeleg</p>' +
+    '<table style="font-size:12px">' +
+    zeile('Zahlungsempfänger', empfaenger) +
+    zeile('Datum der Zahlung', dd) +
+    zeile('Betrag (brutto)', betragStr) +
+    zeile('Zahlungsart', zahlungsart || '–') +
+    zeile('Zweck der Ausgabe', zweck) +
+    zeile('Grund des Eigenbelegs', grund) +
+    '</table>' +
+    '<p style="color:#999;font-size:10px;margin-top:24px">Der Betrag wurde wie angegeben verausgabt. ' +
+    'Dieser Eigenbeleg wurde erstellt, da kein Originalbeleg vorliegt.</p>' +
+    '<p style="margin-top:36px">München, den ' + heute + '</p>' +
+    sigHtml +
+    '<table style="margin-top:4px"><tr><td style="border-top:1px solid #111;padding-top:4px;min-width:260px">' +
+    aussteller + ', ' + firma + '</td></tr></table>' +
+    '</body></html>';
+
+  const pdf = Utilities.newBlob(html, 'text/html', 'eigenbeleg.html').getAs('application/pdf');
+  const mo = monatsOrdner_(root, datumYmd.slice(0, 7));
+  const base = datumYmd + '_Eigenbeleg-' + sanitize(empfaenger).slice(0, 40) + '_' +
+    betragEur.toFixed(2) + 'EUR' + (kontoTag ? '_' + kontoTag : '');
+  let name = base + '.pdf';
+  let n = 2;
+  while (mo.getFilesByName(name).hasNext()) name = base + '_' + (n++) + '.pdf';
+  const file = mo.createFile(pdf).setName(name);
+  file.setDescription('rechnungs-agent:benannt');
+  if (kontoTag) {
+    const subName = /^AMEX/i.test(kontoTag) ? 'AMEX' : (/^Qonto/i.test(kontoTag) ? 'QONTO' : null);
+    if (subName) {
+      const it = mo.getFoldersByName(subName);
+      file.moveTo(it.hasNext() ? it.next() : mo.createFolder(subName));
+    }
+  }
+  notifySlack(':lower_left_fountain_pen: *Eigenbeleg erstellt:* ' + name);
+  return name;
 }
