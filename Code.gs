@@ -208,7 +208,9 @@ function checkMissingReceipts() {
     // angezeigten Berlin-Datum, daher rutschen keine Alt-Positionen rein
     const from = new Date(Math.max(now.getTime() - 35 * 86400000,
       new Date(floorStr).getTime() - 2 * 86400000));
-    // Zuerst alle Belege in die Konto-Unterordner AMEX/QONTO einsortieren + taggen
+    // Zuerst die AMEX-Verbindung prüfen – ohne sie veralten alle AMEX-Daten still
+    try { pruefeAmexVerbindung_(); } catch (e) { /* nie blockieren */ }
+    // Dann alle Belege in die Konto-Unterordner AMEX/QONTO einsortieren + taggen
     try { sortiereBelege_(); } catch (e) { console.warn('Sortieren fehlgeschlagen: ' + e); }
     const driveMap = driveDocMap_(new Date(now.getFullYear(), now.getMonth(), 1));
     const props = PropertiesService.getScriptProperties();
@@ -1173,13 +1175,18 @@ function buildBelegReport(monthStart) {
 function updateBelegSheets_() {
   if (!CONFIG.BELEGCHECK_SHEET_ID || !CONFIG.QONTO_API_SECRET) return;
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const floor = new Date(CONFIG.BELEGPFLICHT_AB || '2026-07-01');
-  if (monthStart.getTime() < new Date(floor.getFullYear(), floor.getMonth(), 1).getTime()) return;
-
-  const d = berechneBelegRows_(monthStart);
+  const floorMonth = new Date(floor.getFullYear(), floor.getMonth(), 1);
   const ss = SpreadsheetApp.openById(CONFIG.BELEGCHECK_SHEET_ID);
   const changes = [];
+
+  // Aktuellen UND Vormonat pflegen: nachgelieferte Buchungen (z. B. nach einer
+  // erneuerten AMEX-Verbindung) landen sonst nie mehr im Vormonats-Tab
+  [0, -1].forEach(off => {
+  const monthStart = new Date(now.getFullYear(), now.getMonth() + off, 1);
+  if (monthStart.getTime() < floorMonth.getTime()) return;
+
+  const d = berechneBelegRows_(monthStart);
 
   [{ name: d.qontoTabName, header: d.qontoHeader, rows: d.qontoRows, amex: false },
    { name: d.amexTabName, header: d.amexHeader, rows: d.amexRows, amex: true }].forEach(tab => {
@@ -1247,6 +1254,7 @@ function updateBelegSheets_() {
     if (toAppend.length || checkedNow) {
       changes.push(tab.name + ': +' + toAppend.length + ' neu, ' + checkedNow + ' abgehakt');
     }
+  });
   });
 
   if (changes.length) {
@@ -1849,4 +1857,39 @@ function erstelleEigenbeleg(datumYmd, betragEur, empfaenger, zweck, zahlungsart,
   }
   notifySlack(':lower_left_fountain_pen: *Eigenbeleg erstellt:* ' + name);
   return name;
+}
+
+// ---------------------------------------------------------------------------
+// Qonto↔AMEX-Verbindung überwachen: Die extern aggregierten AMEX-Konten
+// verlieren nach Ablauf der Bank-Freigabe still die Verbindung – dann kommen
+// keine neuen Buchungen mehr an und BelegCheck/Abgleich veralten unbemerkt.
+// Signal: updated_at der externen Konten bleibt stehen bzw. die Konten
+// verschwinden aus der API. Läuft im täglichen Beleg-Check.
+// ---------------------------------------------------------------------------
+function pruefeAmexVerbindung_() {
+  if (!CONFIG.QONTO_API_SECRET || !CONFIG.SLACK_WEBHOOK_URL) return;
+  const staleTage = CONFIG.AMEX_STALE_TAGE || 3;
+  const now = Date.now();
+  let ext = [];
+  try {
+    ext = (qontoFetch_('/v2/bank_accounts').bank_accounts || [])
+      .filter(a => a.is_external_account && a.status !== 'closed');
+  } catch (e) { return; } // API-Ausfall ist kein Verbindungsurteil
+  let neuester = 0;
+  ext.forEach(a => { const t = new Date(a.updated_at || 0).getTime(); if (t > neuester) neuester = t; });
+  const tot = !ext.length || (now - neuester > staleTage * 86400000);
+  const props = PropertiesService.getScriptProperties();
+  const warOk = props.getProperty('amexVerbindungOk') !== 'false';
+  if (tot) {
+    const seit = ext.length ? Math.round((now - neuester) / 86400000) + ' Tagen' : 'unbekannt';
+    notifySlack(':rotating_light: *AMEX-Verbindung bei Qonto unterbrochen!* ' +
+      (ext.length ? 'Die AMEX-Konten wurden seit ' + seit + ' nicht mehr synchronisiert.'
+                  : 'Die AMEX-Konten fehlen komplett in der Qonto-API.') +
+      '\nBitte in Qonto die Verbindung erneuern: *Konten → American Express → Verbindung erneuern* ' +
+      '(Freigabe in der Amex-App bestätigen). Solange fehlen AMEX-Umsätze im BelegCheck und im Beleg-Abgleich.');
+    props.setProperty('amexVerbindungOk', 'false');
+  } else if (!warOk) {
+    notifySlack(':white_check_mark: *AMEX-Verbindung bei Qonto ist wieder aktiv* – die Umsätze laufen wieder ein, der BelegCheck zieht beim nächsten Lauf nach.');
+    props.setProperty('amexVerbindungOk', 'true');
+  }
 }
