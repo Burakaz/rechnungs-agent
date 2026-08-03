@@ -1083,8 +1083,13 @@ function belegeSortieren() {
 // Berechnet die Soll-Zeilen beider Tabs für einen Monat (ohne Sheet-Zugriff)
 function berechneBelegRows_(monthStart) {
   const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
-  const fromIso = monthStart.toISOString();
-  const toIso = monthEnd.toISOString();
+  // Die AMEX-Abfrage filtert nach emitted_at (Autorisierung), angezeigt wird
+  // aber die Wertstellung – deshalb breiter abfragen und unten strikt nach dem
+  // angezeigten (Berliner) Monat filtern, sonst rutschen Monatswechsel-
+  // Buchungen in den falschen Tab
+  const fromIso = new Date(monthStart.getTime() - 5 * 86400000).toISOString();
+  const toIso = new Date(monthEnd.getTime() + 86400000).toISOString();
+  const zielYm = Utilities.formatDate(monthStart, 'Europe/Berlin', 'yyyy-MM');
   const m = monthStart.getMonth(), y = monthStart.getFullYear();
   const qontoTabName = MONATE[m] + ' ' + y;
   const amexTabName = "Amex " + MONATE[m] + " '" + String(y).slice(2);
@@ -1107,6 +1112,8 @@ function berechneBelegRows_(monthStart) {
       const betrag = (t.side === 'debit' ? -1 : 1) * (t.amount || 0);
       const datum = t.settled_at || t.emitted_at;
       const datumStr = datum ? Utilities.formatDate(new Date(datum), 'Europe/Berlin', 'dd.MM.yyyy') : '';
+      // Nur Buchungen, deren Wertstellung im Zielmonat liegt
+      if (!datum || Utilities.formatDate(new Date(datum), 'Europe/Berlin', 'yyyy-MM') !== zielYm) return;
       if (acc.is_external_account) {
         const hasDoc = betrag >= 0 ||
           (t.attachment_ids && t.attachment_ids.length > 0) ||
@@ -1178,6 +1185,11 @@ function updateBelegSheets_() {
   const floor = new Date(CONFIG.BELEGPFLICHT_AB || '2026-07-01');
   const floorMonth = new Date(floor.getFullYear(), floor.getMonth(), 1);
   const ss = SpreadsheetApp.openById(CONFIG.BELEGCHECK_SHEET_ID);
+  // Datums-Vergleich in der Zeitzone des Spreadsheets: Sheets-Datumszellen sind
+  // Mitternacht in Sheet-TZ – ein hartkodiertes 'Europe/Berlin' kippt sonst bei
+  // abweichender TZ auf den Vortag und der Abgleich hängt Duplikate an
+  let sheetTz = 'Europe/Berlin';
+  try { const t = ss.getSpreadsheetTimeZone(); if (typeof t === 'string' && t) sheetTz = t; } catch (e) { /* Fallback bleibt */ }
   const changes = [];
 
   // Aktuellen UND Vormonat pflegen: nachgelieferte Buchungen (z. B. nach einer
@@ -1196,9 +1208,24 @@ function updateBelegSheets_() {
       changes.push(tab.name + ': neu angelegt (' + tab.rows.length + ' Zeilen)');
       return;
     }
+    // Manuell umgebaute Tabs (z. B. eigene Spalten der Buchhaltung) nicht
+    // anfassen: ein abweichendes Layout sprengt den Abgleich und würde alle
+    // Zeilen als "neu" anhängen. Einmalige Slack-Warnung, danach still.
+    const kopfZeile = sh.getRange(1, 1, 1, 3).getValues()[0];
+    if (String(kopfZeile[2]) !== String(tab.header[2])) {
+      const props = PropertiesService.getScriptProperties();
+      const warnKey = 'layoutWarn_' + tab.name;
+      if (!props.getProperty(warnKey)) {
+        notifySlack(':warning: BelegCheck-Tab *' + tab.name + '* hat ein eigenes Spalten-Layout ' +
+          'und wird nicht mehr automatisch gepflegt. Für automatische Updates das Tab umbenennen ' +
+          '(als Archiv) – der Agent legt es dann frisch an.');
+        props.setProperty(warnKey, '1');
+      }
+      return;
+    }
     // Datum kann als String ODER Date-Objekt aus dem Sheet kommen
     const normDate = v => (v instanceof Date)
-      ? Utilities.formatDate(v, 'Europe/Berlin', 'dd.MM.yyyy') : String(v || '').trim();
+      ? Utilities.formatDate(v, sheetTz, 'dd.MM.yyyy') : String(v || '').trim();
     const keyOf = r => normDate(r[2]) + '|' +
       Number(tab.amex ? r[5] : r[7]).toFixed(2) + '|' +
       String(tab.amex ? r[3] : r[4]).trim();
