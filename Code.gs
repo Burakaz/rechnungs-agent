@@ -339,11 +339,20 @@ function pullGmiDocuments() {
   const headers = { 'X-API-KEY': CONFIG.GMI_API_KEY, Accept: 'application/json' };
   const abgelegt = [];
   try {
+    // startDateFilter filtert nach RECHNUNGSDATUM – nachgereichte Belege
+    // (gescannte Bons, Google-Ads-Monatsrechnungen zum Monatsultimo) tragen
+    // aber oft ein Datum aus dem Vormonat, obwohl sie erst jetzt in GMI
+    // ankommen. Darum 35 Tage vor den Stichtag greifen (Fenster des
+    // Beleg-Abgleichs); was GMI schon VOR dem Stichtag geholt hatte,
+    // blockt weiterhin das createdAt-Gate unten.
+    const gmiStart = Utilities.formatDate(
+      new Date(new Date(floor).getTime() - 35 * 86400000),
+      'Europe/Berlin', 'yyyy-MM-dd');
     let offset = 0, guard = 0;
     while (guard++ < 20) {
       if (Date.now() - startTime > MAX_RUNTIME_MS) break;
       const resp = UrlFetchApp.fetch('https://api.getmyinvoices.com/accounts/v3/documents' +
-        '?limit=100&offset=' + offset + '&startDateFilter=' + floor,
+        '?limit=100&offset=' + offset + '&startDateFilter=' + gmiStart,
         { headers: headers, muteHttpExceptions: true });
       if (resp.getResponseCode() !== 200) break;
       const data = JSON.parse(resp.getContentText());
