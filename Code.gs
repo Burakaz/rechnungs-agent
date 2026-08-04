@@ -1208,20 +1208,17 @@ function updateBelegSheets_() {
       changes.push(tab.name + ': neu angelegt (' + tab.rows.length + ' Zeilen)');
       return;
     }
-    // Manuell umgebaute Tabs (z. B. eigene Spalten der Buchhaltung) nicht
-    // anfassen: ein abweichendes Layout sprengt den Abgleich und würde alle
-    // Zeilen als "neu" anhängen. Einmalige Slack-Warnung, danach still.
-    const kopfZeile = sh.getRange(1, 1, 1, 3).getValues()[0];
-    if (String(kopfZeile[2]) !== String(tab.header[2])) {
-      const props = PropertiesService.getScriptProperties();
-      const warnKey = 'layoutWarn_' + tab.name;
-      if (!props.getProperty(warnKey)) {
-        notifySlack(':warning: BelegCheck-Tab *' + tab.name + '* hat ein eigenes Spalten-Layout ' +
-          'und wird nicht mehr automatisch gepflegt. Für automatische Updates das Tab umbenennen ' +
-          '(als Archiv) – der Agent legt es dann frisch an.');
-        props.setProperty(warnKey, '1');
-      }
-      return;
+    // Kompatibilität am INHALT prüfen, nicht am Kopftext: Für den Abgleich
+    // müssen Datum und Betrag an den erwarteten Positionen liegen. Baut die
+    // Buchhaltung ein (Vormonats-)Tab auf ihre eigene Struktur um, wird es
+    // still respektiert und nicht mehr angefasst – keine Aufforderungen.
+    const probeLast = sh.getLastRow();
+    if (probeLast > 1) {
+      const probe = sh.getRange(2, 1, 1, tab.header.length).getValues()[0];
+      const datumOk = probe[2] instanceof Date ||
+        /^\d{2}\.\d{2}\.\d{4}$/.test(String(probe[2] || '').trim());
+      const betragOk = typeof (tab.amex ? probe[5] : probe[7]) === 'number';
+      if (!datumOk || !betragOk) return;
     }
     // Datum kann als String ODER Date-Objekt aus dem Sheet kommen
     const normDate = v => (v instanceof Date)
