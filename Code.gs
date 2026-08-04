@@ -27,6 +27,14 @@ const CONFIG = {
   // Slack Incoming Webhook für Benachrichtigungen in #belege ('' = aus)
   SLACK_WEBHOOK_URL: '',
 
+  // Slack-Bot für den Beleg-Kanal: erlaubt Beleg-Uploads direkt in Slack
+  // (im Channel oder als Thread-Antwort auf einen Fehlposten-Beitrag) und den
+  // Thread-Befehl `eigenbeleg <Zweck>`. Eigene Slack-App nötig – Bot-Token
+  // (xoxb-…) mit den Scopes channels:history, groups:history, files:read,
+  // chat:write; den Bot in den Channel einladen. '' = aus (nur Webhook).
+  SLACK_BOT_TOKEN: '',
+  SLACK_CHANNEL_ID: '',
+
   // GetMyInvoices-API-Key (GMI → Profilmenü oben rechts → API Zugriff → "+")
   // für den täglichen Beleg-Check über alle Konten inkl. AMEX ('' = aus)
   GMI_API_KEY: '',
@@ -216,6 +224,7 @@ function checkMissingReceipts() {
     const props = PropertiesService.getScriptProperties();
     const reminders = JSON.parse(props.getProperty('belegReminders') || '{}');
     const missing = [], mentions = [], offen = [];
+    const scanned = new Set();
 
     alleBankKonten_().forEach(acc => {
       if (acc.status === 'closed') return;
@@ -223,12 +232,16 @@ function checkMissingReceipts() {
       txs.forEach(t => {
         const betrag = (t.side === 'debit' ? -1 : 1) * (t.amount || 0);
         if (betrag >= 0 || t.operation_type === 'qonto_fee') return;
-        if (t.attachment_ids && t.attachment_ids.length > 0) return;
         if (istDauerbeleg_(t)) return;
         const datum = new Date(t.settled_at || t.emitted_at);
         // Stichtag nach angezeigtem (Berliner) Datum – wie im BelegCheck-Sheet
         if (Utilities.formatDate(datum, 'Europe/Berlin', 'yyyy-MM-dd') < floorStr) return;
         const key = t.transaction_id || t.id;
+        // Im Fenster gesehen – nur für solche Posten darf der Slack-Thread
+        // später als "erledigt" abgehakt werden (sonst wäre ein aus dem
+        // 35-Tage-Fenster gerutschter Posten fälschlich "eingegangen")
+        scanned.add(key);
+        if (t.attachment_ids && t.attachment_ids.length > 0) { delete reminders[key]; return; }
         if (driveHasDoc_(driveMap, Math.abs(betrag), datum.getTime(), t.label, kontoTag_(acc))) {
           delete reminders[key];
           return;
@@ -290,6 +303,13 @@ function checkMissingReceipts() {
     });
     props.setProperty('belegReminders', JSON.stringify(reminders));
 
+    // Slack-Einzelposten: jeder offene Posten bekommt (einmalig) eine eigene
+    // Channel-Nachricht – Belege lassen sich direkt in deren Thread hochladen,
+    // pullSlackBelege() legt sie dann automatisch ab
+    try { slackEinzelposten_(offen, scanned); } catch (e) {
+      console.warn('Slack-Einzelposten fehlgeschlagen: ' + e);
+    }
+
     // BelegCheck-Sheet des laufenden Monats bei jedem Check aktuell halten
     try { updateBelegSheets_(); } catch (e) {
       console.warn('Sheet-Update fehlgeschlagen: ' + e);
@@ -301,8 +321,9 @@ function checkMissingReceipts() {
       missing.slice(0, 25).map(z => '• ' + z).join('\n') +
       (missing.length > 25 ? '\n… und ' + (missing.length - 25) + ' weitere' : '');
     if (mentions.length) {
-      text += '\n\n:point_right: *Bitte Beleg nachreichen* – PDF in den ' +
-        '<https://drive.google.com/drive/folders/' + CONFIG.DRIVE_FOLDER_ID +
+      text += '\n\n:point_right: *Bitte Beleg nachreichen* – ' +
+        (CONFIG.SLACK_BOT_TOKEN ? 'einfach im Thread der jeweiligen Fehlposten-Nachricht hier im Channel hochladen, ' : '') +
+        'PDF in den <https://drive.google.com/drive/folders/' + CONFIG.DRIVE_FOLDER_ID +
         '|Rechnungs-Ordner> legen oder an belege@deine-firma.de mailen:\n' +
         mentions.map(z => '• ' + z).join('\n');
     }
@@ -1511,6 +1532,10 @@ function kontoTag_(acc) {
 // + AMEX/QONTO). Bereits benannte oder markierte Dateien werden übersprungen.
 // ---------------------------------------------------------------------------
 function processDriveUploads() {
+  // Slack-Uploads zuerst einsammeln: Thread-Antworten auf Fehlposten werden
+  // direkt benannt abgelegt, Channel-Uploads landen im Scan-Eingang und
+  // laufen unten im selben Lauf durch die Benennungs-Pipeline
+  try { pullSlackBelege(); } catch (e) { console.warn('Slack-Beleg-Pull fehlgeschlagen: ' + e); }
   if (!CONFIG.ANTHROPIC_API_KEY) return;
   const MARKER = 'rechnungs-agent:benannt';
   const startTime = Date.now();
@@ -1814,7 +1839,7 @@ function storeProcessedIds(set) {
 // ---------------------------------------------------------------------------
 // Eigenbelege (Ersatzbelege): erstellt ein formales Eigenbeleg-PDF für
 // Zahlungen ohne erhältlichen Originalbeleg und legt es benannt + getaggt im
-// Monatsordner ab. Unterschrift: einmal eine Bilddatei "Unterschrift_Burak.png"
+// Monatsordner ab. Unterschrift: einmal eine Bilddatei "Unterschrift.png"
 // (weißer Hintergrund) in den Rechnungs-Root legen – sie wird ab dann in jeden
 // Eigenbeleg eingebettet; fehlt sie, bleibt eine Linie zum Unterschreiben.
 // Aufruf im Editor, z. B.:
@@ -1824,11 +1849,11 @@ function storeProcessedIds(set) {
 function erstelleEigenbeleg(datumYmd, betragEur, empfaenger, zweck, zahlungsart, kontoTag, grund) {
   const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
   grund = grund || 'Vom Zahlungsempfänger wurde kein Beleg ausgestellt bzw. der Beleg ist nicht mehr vorhanden';
-  const aussteller = CONFIG.EIGENBELEG_AUSSTELLER || 'Burak Ekin, Geschäftsführer';
+  const aussteller = CONFIG.EIGENBELEG_AUSSTELLER || 'Max Mustermann, Geschäftsführer';
   const firma = CONFIG.EIGENBELEG_FIRMA || 'ADMKRS GmbH';
 
   let sigHtml = '<div style="height:60px"></div>';
-  const sigIt = root.getFilesByName('Unterschrift_Burak.png');
+  const sigIt = root.getFilesByName('Unterschrift.png');
   if (sigIt.hasNext()) {
     const sb = sigIt.next().getBlob();
     sigHtml = '<img src="data:' + sb.getContentType() + ';base64,' +
@@ -1916,4 +1941,234 @@ function pruefeAmexVerbindung_() {
     notifySlack(':white_check_mark: *AMEX-Verbindung bei Qonto ist wieder aktiv* – die Umsätze laufen wieder ein, der BelegCheck zieht beim nächsten Lauf nach.');
     props.setProperty('amexVerbindungOk', 'true');
   }
+}
+
+// ---------------------------------------------------------------------------
+// Slack-Belege: Der Beleg-Kanal wird zum Eingangskorb. Zwei Wege:
+// 1. Jeder offene Posten aus dem Beleg-Check bekommt (einmalig) eine eigene
+//    Channel-Nachricht. Wer den Beleg hat, lädt ihn einfach als Antwort in
+//    deren Thread – er wird sofort korrekt benannt (Datum/Anbieter/Betrag/
+//    Konto aus der Buchung) im richtigen Monatsordner abgelegt. Alternativ
+//    erstellt `eigenbeleg <Zweck>` als Thread-Antwort den digitalen Ersatzbeleg.
+// 2. PDFs/Fotos, die irgendwo sonst im Channel hochgeladen werden, wandern in
+//    den Scan-Eingang und laufen durch die normale KI-Benennung.
+// Fotos werden in PDFs umgewandelt, Byte-Duplikate über die geteilte
+// Hash-Datei erkannt. Braucht SLACK_BOT_TOKEN + SLACK_CHANNEL_ID.
+// ---------------------------------------------------------------------------
+function slackApi_(method, params) {
+  const res = UrlFetchApp.fetch('https://slack.com/api/' + method, {
+    method: 'post',
+    headers: { Authorization: 'Bearer ' + CONFIG.SLACK_BOT_TOKEN },
+    payload: params || {},
+    muteHttpExceptions: true,
+  });
+  const json = JSON.parse(res.getContentText() || '{}');
+  if (!json.ok) throw new Error('Slack ' + method + ': ' + (json.error || res.getResponseCode()));
+  return json;
+}
+
+function slackBotReply_(threadTs, text) {
+  try {
+    slackApi_('chat.postMessage', { channel: CONFIG.SLACK_CHANNEL_ID, text: text, thread_ts: threadTs });
+  } catch (e) { console.warn('Slack-Thread-Antwort fehlgeschlagen: ' + e); }
+}
+
+// Foto eines Belegs in ein PDF einbetten, damit Abgleich und Ablage
+// (beides rein PDF-basiert) es wie einen normalen Beleg behandeln
+function bildZuPdf_(blob) {
+  const html = '<html><body style="margin:0"><img src="data:' + blob.getContentType() +
+    ';base64,' + Utilities.base64Encode(blob.getBytes()) + '" style="width:100%" /></body></html>';
+  return Utilities.newBlob(html, 'text/html', 'beleg.html').getAs('application/pdf');
+}
+
+// Je offenem Posten einmalig eine eigene Slack-Nachricht posten und deren
+// Thread-Timestamp mit den Buchungsdaten verknüpfen; erledigte Posten im
+// Thread abhaken. Läuft im täglichen Beleg-Check.
+function slackEinzelposten_(offen, scannedKeys) {
+  if (!CONFIG.SLACK_BOT_TOKEN || !CONFIG.SLACK_CHANNEL_ID) return;
+  const props = PropertiesService.getScriptProperties();
+  const threads = JSON.parse(props.getProperty('slackBelegThreads') || '{}');
+  const now = Date.now();
+  const byKey = {};
+  Object.keys(threads).forEach(ts => { byKey[threads[ts].key] = ts; });
+
+  // Erledigte Posten: Buchung wurde in diesem Lauf gesehen, ist aber nicht
+  // mehr offen → Beleg ist da. Haken in den Thread, Tracking beenden.
+  Object.keys(threads).forEach(ts => {
+    const tx = threads[ts];
+    const nochOffen = offen.some(o => !o.gedeckt && o.key === tx.key);
+    if (!nochOffen && scannedKeys.has(tx.key)) {
+      slackBotReply_(ts, ':white_check_mark: Beleg eingegangen – erledigt.');
+      delete threads[ts];
+    } else if (now - (tx.t || 0) > 60 * 86400000) {
+      delete threads[ts]; // längst aus dem Prüf-Fenster – still austragen
+    }
+  });
+
+  offen.filter(o => !o.gedeckt && !byKey[o.key]).forEach(o => {
+    const kTag = kontoTag_(o.acc);
+    const text = ':receipt: *Fehlender Beleg:* ' +
+      Utilities.formatDate(o.datum, 'Europe/Berlin', 'dd.MM.') + ' · ' +
+      (o.label || '?') + ' – ' + o.betrag.toFixed(2) + ' € (' + kTag + ')\n' +
+      '_Beleg (PDF oder Foto) einfach hier in den Thread laden – ich benenne ' +
+      'ihn und lege ihn automatisch ab. Kein Beleg mehr aufzutreiben? ' +
+      'Mit `eigenbeleg <Zweck>` antworten._';
+    try {
+      const r = slackApi_('chat.postMessage', { channel: CONFIG.SLACK_CHANNEL_ID, text: text });
+      threads[r.ts] = {
+        key: o.key,
+        d: Utilities.formatDate(o.datum, 'Europe/Berlin', 'yyyy-MM-dd'),
+        a: o.betrag, v: String(o.label || 'Beleg'), k: kTag, t: o.datum.getTime(),
+      };
+    } catch (e) { console.warn('Slack-Einzelpost fehlgeschlagen: ' + e); }
+  });
+
+  props.setProperty('slackBelegThreads', JSON.stringify(threads));
+}
+
+// Stündlich (am Anfang von processDriveUploads): neue Uploads und
+// Thread-Antworten aus dem Beleg-Kanal abholen und ablegen.
+function pullSlackBelege() {
+  if (!CONFIG.SLACK_BOT_TOKEN || !CONFIG.SLACK_CHANNEL_ID) return;
+  const props = PropertiesService.getScriptProperties();
+  const seen = new Set(JSON.parse(props.getProperty('slackBelegDateien') || '[]'));
+  const threads = JSON.parse(props.getProperty('slackBelegThreads') || '{}');
+  let dirty = false;
+
+  // Eigene Bot-Identität einmalig ermitteln (eigene Nachrichten überspringen)
+  let botUser = props.getProperty('slackBotUser');
+  if (!botUser) {
+    try {
+      botUser = slackApi_('auth.test', {}).user_id || '';
+      props.setProperty('slackBotUser', botUser);
+    } catch (e) { console.warn('Slack auth.test fehlgeschlagen: ' + e); return; }
+  }
+
+  // Kandidaten: neue Channel-Nachrichten (3-Tage-Fenster reicht beim
+  // stündlichen Lauf) inkl. deren Thread-Antworten, plus die Threads der
+  // getrackten Fehlposten (auch wenn der Ursprungspost älter ist)
+  const kandidaten = [];
+  try {
+    const oldest = ((Date.now() - 3 * 86400000) / 1000).toFixed(6);
+    (slackApi_('conversations.history',
+      { channel: CONFIG.SLACK_CHANNEL_ID, oldest: oldest, limit: '200' }).messages || []
+    ).forEach(m => {
+      kandidaten.push(m);
+      if (m.reply_count && !threads[m.ts]) {
+        try {
+          (slackApi_('conversations.replies',
+            { channel: CONFIG.SLACK_CHANNEL_ID, ts: m.ts, limit: '50' }).messages || []
+          ).slice(1).forEach(r => kandidaten.push(r));
+        } catch (e) { /* Thread nicht lesbar – überspringen */ }
+      }
+    });
+  } catch (e) { console.warn('Slack-History fehlgeschlagen: ' + e); return; }
+  Object.keys(threads).forEach(ts => {
+    try {
+      (slackApi_('conversations.replies',
+        { channel: CONFIG.SLACK_CHANNEL_ID, ts: ts, limit: '50' }).messages || []
+      ).slice(1).forEach(m => { m.threadKey = ts; kandidaten.push(m); });
+    } catch (e) { /* Ursprungsnachricht gelöscht – läuft über slackEinzelposten_ aus */ }
+  });
+
+  const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+  const hashes = loadSeenHashes();
+  let abgelegt = 0;
+
+  kandidaten.forEach(m => {
+    if (m.bot_id || m.user === botUser) return;
+    const tKey = m.threadKey || ((m.thread_ts && threads[m.thread_ts]) ? m.thread_ts : '');
+    const tx = tKey ? threads[tKey] : null;
+
+    // Textbefehl im Fehlposten-Thread: Eigenbeleg erstellen (einmal pro Posten)
+    if (tx && !(m.files || []).length) {
+      const eb = String(m.text || '').match(/^\s*eigenbeleg\b[.:]?\s*([\s\S]*)$/i);
+      if (eb && !tx.eb) {
+        try {
+          const zart = /^AMEX/i.test(tx.k) ? 'Kreditkarte (AMEX)' : 'Qonto-Konto (Lastschrift/Überweisung)';
+          const name = erstelleEigenbeleg(tx.d, Number(tx.a), tx.v,
+            eb[1].trim() || 'Betriebliche Ausgabe – ' + tx.v, zart, tx.k);
+          tx.eb = 1; dirty = true;
+          slackBotReply_(tKey, ':lower_left_fountain_pen: Eigenbeleg erstellt und abgelegt: `' + name + '`');
+        } catch (e) {
+          slackBotReply_(tKey, ':warning: Eigenbeleg fehlgeschlagen: ' + e);
+        }
+      }
+      return;
+    }
+
+    (m.files || []).forEach(file => {
+      if (seen.has(file.id)) return;
+      seen.add(file.id); dirty = true;
+      const mime = String(file.mimetype || '');
+      const istPdf = mime === 'application/pdf';
+      const istBild = /^image\//.test(mime);
+      if (!istPdf && !istBild) return;
+
+      let blob;
+      try {
+        const res = UrlFetchApp.fetch(file.url_private_download || file.url_private, {
+          headers: { Authorization: 'Bearer ' + CONFIG.SLACK_BOT_TOKEN },
+          muteHttpExceptions: true,
+        });
+        if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
+        blob = res.getBlob();
+        if (/text\/html/i.test(String(blob.getContentType() || ''))) {
+          throw new Error('kein Dateizugriff (fehlt der Scope files:read?)');
+        }
+      } catch (e) { console.warn('Slack-Download fehlgeschlagen (' + file.name + '): ' + e); return; }
+
+      const hash = md5hex(blob.getBytes());
+      if (hashes.has(hash)) {
+        slackBotReply_(tKey || m.thread_ts || m.ts, ':information_source: `' + file.name +
+          '` war schon einmal da – vermutlich bereits abgelegt, ich lege nichts doppelt ab.');
+        return;
+      }
+      let pdf = blob;
+      if (istBild) {
+        try { pdf = bildZuPdf_(blob); } catch (e) {
+          slackBotReply_(tKey || m.thread_ts || m.ts, ':warning: Konnte `' + file.name +
+            '` nicht in ein PDF umwandeln – bitte als PDF oder kleineres Foto hochladen.');
+          return;
+        }
+      }
+
+      try {
+        if (tx) {
+          // Antwort auf einen konkreten Fehlposten: sofort korrekt benannt in
+          // den Monats-/Konto-Ordner – Abgleich hakt ihn beim nächsten Lauf ab
+          const mo = monatsOrdner_(root, tx.d.slice(0, 7));
+          const sub = /^AMEX/i.test(tx.k) ? 'AMEX' : (/^(Qonto|Bank)/i.test(tx.k) ? 'QONTO' : null);
+          let ziel = mo;
+          if (sub) {
+            const it = mo.getFoldersByName(sub);
+            ziel = it.hasNext() ? it.next() : mo.createFolder(sub);
+          }
+          const name = eindeutigerName_(ziel, tx.d + '_' +
+            (sanitize(tx.v).slice(0, 40) || 'Beleg') + '_' +
+            Number(tx.a).toFixed(2) + 'EUR_' + tx.k + '.pdf');
+          ziel.createFile(pdf).setName(name).setDescription('rechnungs-agent:benannt');
+          slackBotReply_(tKey, ':inbox_tray: Beleg abgelegt als `' + name +
+            '` – der Posten wird beim nächsten Abgleich abgehakt.');
+        } else {
+          // Upload ohne Posten-Bezug: in den Scan-Eingang, die KI-Benennung
+          // übernimmt direkt im Anschluss im selben Lauf
+          const inbox = CONFIG.SCAN_INBOX_FOLDER_ID
+            ? DriveApp.getFolderById(CONFIG.SCAN_INBOX_FOLDER_ID) : root;
+          inbox.createFile(pdf).setName(
+            String(file.name || 'Slack-Beleg').replace(/\.[^.]+$/, '') + '.pdf');
+          slackBotReply_(m.thread_ts || m.ts, ':mag: `' + (file.name || 'Beleg') +
+            '` angekommen – wird gelesen, benannt und einsortiert.');
+        }
+        hashes.add(hash);
+        abgelegt++;
+      } catch (e) { console.warn('Slack-Beleg-Ablage fehlgeschlagen: ' + e); }
+    });
+  });
+
+  if (dirty) {
+    props.setProperty('slackBelegDateien', JSON.stringify(Array.from(seen).slice(-500)));
+    props.setProperty('slackBelegThreads', JSON.stringify(threads));
+  }
+  if (abgelegt) storeSeenHashes(hashes);
 }
