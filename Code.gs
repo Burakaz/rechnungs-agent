@@ -1445,7 +1445,10 @@ function driveDocMap_(monthStart, exactOnly) {
 
 // Buchungslabel ≠ Markenname auf der Rechnung: Aliasse für den Vendor-Abgleich
 const VENDOR_ALIAS = { facebook: 'meta', celonis: 'make', realtimeboard: 'miro',
-  logpayfinan: 'transdev', logpay: 'transdev' };
+  logpayfinan: 'transdev', logpay: 'transdev',
+  // "SAX GASTSTAETTEN GMBH": "sax" hat nur 3 Buchstaben, vendorToken_ greift
+  // sich "gaststaetten" – die Rechnung heißt aber "Sax-Gauch"
+  gaststaetten: 'sax' };
 
 // Erstes aussagekräftiges Wort (≥4 Buchstaben) aus einem Buchungslabel
 function vendorToken_(label) {
