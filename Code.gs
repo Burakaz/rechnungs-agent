@@ -1979,6 +1979,22 @@ function bildZuPdf_(blob) {
   return Utilities.newBlob(html, 'text/html', 'beleg.html').getAs('application/pdf');
 }
 
+// Bot-Zugang kaputt (Token rotiert/abgelaufen, Bot aus dem Channel entfernt):
+// Das meldet der Agent über den unabhängigen Webhook, sonst bleibt es still –
+// er könnte den Kanal dann nicht mehr lesen und niemand würde es merken.
+// Höchstens einmal pro Tag, damit der stündliche Lauf nicht zumüllt.
+function slackBotFehler_(e) {
+  console.warn('Slack-Bot-Zugang: ' + e);
+  const props = PropertiesService.getScriptProperties();
+  if (Date.now() - Number(props.getProperty('slackBotFehlerWarn') || 0) < 86400000) return;
+  props.setProperty('slackBotFehlerWarn', String(Date.now()));
+  notifySlack(':warning: *Beleg-Upload über Slack geht gerade nicht* – Slack lehnt meinen ' +
+    'Bot-Zugang ab (`' + String(e).slice(0, 120) + '`). Belege bitte solange per Mail ' +
+    'schicken oder direkt in den Drive-Ordner legen; ich hole sie dort weiterhin ab.\n' +
+    '_Zum Beheben: in der Slack-App unter „OAuth & Permissions" den aktuellen ' +
+    '„Bot User OAuth Token" kopieren und im Skript bei SLACK_BOT_TOKEN eintragen._');
+}
+
 // Stündlich (am Anfang von processDriveUploads): neue Uploads aus dem
 // Beleg-Kanal abholen und in den Scan-Eingang legen – die KI-Benennung
 // und Einsortierung übernimmt derselbe Lauf direkt im Anschluss.
@@ -1994,7 +2010,7 @@ function pullSlackBelege() {
     try {
       botUser = slackApi_('auth.test', {}).user_id || '';
       props.setProperty('slackBotUser', botUser);
-    } catch (e) { console.warn('Slack auth.test fehlgeschlagen: ' + e); return; }
+    } catch (e) { slackBotFehler_(e); return; }
   }
 
   // Neue Nachrichten der letzten 3 Tage (reicht beim stündlichen Lauf)
@@ -2014,7 +2030,9 @@ function pullSlackBelege() {
         } catch (e) { /* Thread nicht lesbar – überspringen */ }
       }
     });
-  } catch (e) { console.warn('Slack-History fehlgeschlagen: ' + e); return; }
+  } catch (e) { slackBotFehler_(e); return; }
+  // Zugang funktioniert wieder – nächste Störung darf sofort melden
+  props.deleteProperty('slackBotFehlerWarn');
 
   const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
   const hashes = loadSeenHashes();
