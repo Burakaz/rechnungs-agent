@@ -2073,4 +2073,116 @@ function pullSlackBelege() {
 
   if (dirty) props.setProperty('slackBelegDateien', JSON.stringify(Array.from(seen).slice(-500)));
   if (abgelegt) storeSeenHashes(hashes);
+
+  // Textnachrichten im Channel beantworten (Beleg-Suchanfragen der Buchhaltung)
+  try { beantworteSlackFragen_(kandidaten, botUser); } catch (e) {
+    console.warn('Slack-Fragen fehlgeschlagen: ' + e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fragen im Beleg-Kanal beantworten: "Such mir bitte den Beleg für X raus."
+// Die Buchhaltung sucht nach BUCHUNGSDATUM und EUR-Betrag, abgelegt sind die
+// Belege aber nach RECHNUNGSDATUM und Originalwährung – genau diese Übersetzung
+// übernimmt Claude anhand des Datei-Index der letzten Monate. Antwort kommt als
+// Thread-Reply mit direkten Drive-Links. Reine Textnachrichten ohne Bezug zu
+// Belegen bleiben unbeantwortet.
+// ---------------------------------------------------------------------------
+function belegIndex_(monate) {
+  const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+  const now = new Date();
+  const idx = [];
+  for (let off = 0; off > -(monate || 4); off--) {
+    const ym = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth() + off, 1),
+      'Europe/Berlin', 'yyyy-MM');
+    const yIt = root.getFoldersByName(ym.slice(0, 4));
+    if (!yIt.hasNext()) continue;
+    const mIt = yIt.next().getFoldersByName(ym);
+    if (!mIt.hasNext()) continue;
+    const mf = mIt.next();
+    const scan = [{ f: mf, ort: ym }];
+    ['AMEX', 'QONTO', 'Sonstiges'].forEach(sub => {
+      const it = mf.getFoldersByName(sub);
+      if (it.hasNext()) scan.push({ f: it.next(), ort: ym + '/' + sub });
+    });
+    scan.forEach(s => {
+      const files = s.f.getFiles();
+      while (files.hasNext()) {
+        const f = files.next();
+        if (f.getMimeType() !== 'application/pdf') continue;
+        idx.push({ n: f.getName(), id: f.getId(), ort: s.ort });
+      }
+    });
+  }
+  return idx;
+}
+
+function beantworteSlackFragen_(kandidaten, botUser) {
+  if (!CONFIG.ANTHROPIC_API_KEY) return;
+  const props = PropertiesService.getScriptProperties();
+  const done = new Set(JSON.parse(props.getProperty('slackFragenBeantwortet') || '[]'));
+
+  const fragen = (kandidaten || []).filter(m =>
+    !m.bot_id && m.user !== botUser && !(m.files || []).length &&
+    String(m.text || '').trim().length >= 10 && !done.has(m.ts));
+  if (!fragen.length) return;
+
+  const idx = belegIndex_(4);
+  const liste = idx.map((e, i) => '[' + i + '] ' + e.n + '  (' + e.ort + ')').join('\n');
+
+  fragen.forEach(m => {
+    done.add(m.ts);
+    let antwort = null;
+    try {
+      const prompt =
+        'Du bist der Rechnungs-Agent und liest im Slack-Kanal für Belege mit.\n' +
+        'Eine Person schreibt dort:\n"""\n' + String(m.text).slice(0, 2000) + '\n"""\n\n' +
+        'Deine abgelegten Belege (Dateiname und Ordner), durchnummeriert:\n' + liste + '\n\n' +
+        'WICHTIG zur Namenskonvention: Dateiname = <RECHNUNGSDATUM>_<Anbieter>_' +
+        '<Rechnungsnummer>_<Betrag><Währung>_<Konto>.pdf. Die Buchhaltung sucht dagegen ' +
+        'nach BUCHUNGSDATUM und EUR-Betrag. Beides weicht regelmäßig ab:\n' +
+        '• Das Rechnungsdatum liegt oft 1–3 Tage (bei Lastschrift auch länger) vor der Buchung, ' +
+        'ein Beleg kann daher im VORMONATS-Ordner liegen.\n' +
+        '• Belege in USD tragen den USD-Betrag, abgebucht wurde in EUR (z. B. 161.50USD ≈ 144 €).\n' +
+        '• Trinkgeld: Der Bewirtungsbeleg kann kleiner sein als die Abbuchung.\n' +
+        'Ordne jeden gesuchten Posten so gut wie möglich zu. Sei ehrlich, wenn nichts passt.\n\n' +
+        'Antworte NUR mit JSON, ohne Markdown:\n' +
+        '{"ist_anfrage": true|false,  // false, wenn die Nachricht nichts von dir will\n' +
+        ' "antwort": "Deine Slack-Antwort auf Deutsch, per du, freundlich und knapp. ' +
+        'Für jeden gefundenen Beleg schreibe den Platzhalter [[NUMMER]] (die Nummer aus der Liste) ' +
+        '– daraus wird automatisch ein klickbarer Link. Nenne kurz, warum der Beleg anders heißt ' +
+        '(z. B. Rechnungsdatum, USD-Betrag). Nicht gefundene Posten klar benennen und sagen, ' +
+        'dass der Beleg per Upload hier im Channel nachgereicht werden kann. ' +
+        'Keine Anrede-Floskeln wie \\"Hallo zusammen\\", direkt zur Sache."}';
+
+      const resp = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+        method: 'post',
+        contentType: 'application/json',
+        headers: { 'x-api-key': CONFIG.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+        payload: JSON.stringify({
+          model: 'claude-sonnet-5',
+          max_tokens: 1200,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+        muteHttpExceptions: true,
+      });
+      if (resp.getResponseCode() !== 200) {
+        console.warn('Claude-Fehler (Slack-Frage): ' + resp.getContentText().slice(0, 300));
+        return;
+      }
+      const data = JSON.parse(JSON.parse(resp.getContentText()).content[0].text
+        .replace(/```json|```/g, '').trim());
+      if (data.ist_anfrage && data.antwort) antwort = String(data.antwort);
+    } catch (e) { console.warn('Slack-Frage nicht beantwortbar: ' + e); return; }
+
+    if (!antwort) return;
+    // Platzhalter [[n]] durch echte Drive-Links ersetzen (nur gültige Nummern)
+    antwort = antwort.replace(/\[\[(\d+)\]\]/g, (treffer, nr) => {
+      const e = idx[Number(nr)];
+      return e ? '<https://drive.google.com/file/d/' + e.id + '/view|' + e.n + '>' : '';
+    });
+    slackBotReply_(m.thread_ts || m.ts, antwort);
+  });
+
+  props.setProperty('slackFragenBeantwortet', JSON.stringify(Array.from(done).slice(-200)));
 }
