@@ -2147,11 +2147,12 @@ function beantworteSlackFragen_(kandidaten, botUser) {
 
   const idx = belegIndex_(4);
   const liste = idx.map((e, i) => '[' + i + '] ' + e.n + '  (' + e.ort + ')').join('\n');
+  const fehler = JSON.parse(props.getProperty('slackFragenFehler') || '{}');
 
   fragen.forEach(m => {
-    done.add(m.ts);
-    let antwort = null;
+    let antwort = null, gescheitert = false;
     try {
+
       const prompt =
         'Du bist der Rechnungs-Agent und liest im Slack-Kanal für Belege mit.\n' +
         'Eine Person schreibt dort:\n"""\n' + String(m.text).slice(0, 2000) + '\n"""\n\n' +
@@ -2179,21 +2180,38 @@ function beantworteSlackFragen_(kandidaten, botUser) {
         headers: { 'x-api-key': CONFIG.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
         payload: JSON.stringify({
           model: 'claude-sonnet-5',
-          max_tokens: 1200,
+          max_tokens: 2000,
           messages: [{ role: 'user', content: prompt }],
         }),
         muteHttpExceptions: true,
       });
       if (resp.getResponseCode() !== 200) {
-        console.warn('Claude-Fehler (Slack-Frage): ' + resp.getContentText().slice(0, 300));
-        return;
+        throw new Error('HTTP ' + resp.getResponseCode() + ' ' + resp.getContentText().slice(0, 200));
       }
-      const data = JSON.parse(JSON.parse(resp.getContentText()).content[0].text
-        .replace(/```json|```/g, '').trim());
+      // Die Antwort kann mehrere Blöcke enthalten (z. B. einen Denk-Block vor
+      // dem Text) – deshalb alle Text-Blöcke einsammeln statt blind content[0]
+      const roh = (JSON.parse(resp.getContentText()).content || [])
+        .filter(b => b && b.type === 'text').map(b => b.text || '').join('\n');
+      const json = roh.replace(/```json|```/g, '').trim();
+      if (!json) throw new Error('leere Antwort');
+      const data = JSON.parse(json);
       if (data.ist_anfrage && data.antwort) antwort = String(data.antwort);
-    } catch (e) { console.warn('Slack-Frage nicht beantwortbar: ' + e); return; }
+    } catch (e) {
+      console.warn('Slack-Frage nicht beantwortbar: ' + e);
+      gescheitert = true;
+    }
 
+    // Technisch gescheitert: nächster Lauf versucht es erneut, nach dem
+    // dritten Fehlversuch endgültig abhaken (sonst Dauerschleife)
+    if (gescheitert) {
+      fehler[m.ts] = (fehler[m.ts] || 0) + 1;
+      if (fehler[m.ts] >= 3) { done.add(m.ts); delete fehler[m.ts]; }
+      return;
+    }
+    done.add(m.ts);
+    delete fehler[m.ts];
     if (!antwort) return;
+
     // Platzhalter [[n]] durch echte Drive-Links ersetzen (nur gültige Nummern)
     antwort = antwort.replace(/\[\[(\d+)\]\]/g, (treffer, nr) => {
       const e = idx[Number(nr)];
@@ -2203,4 +2221,5 @@ function beantworteSlackFragen_(kandidaten, botUser) {
   });
 
   props.setProperty('slackFragenBeantwortet', JSON.stringify(Array.from(done).slice(-200)));
+  props.setProperty('slackFragenFehler', JSON.stringify(fehler));
 }
