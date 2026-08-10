@@ -1447,8 +1447,10 @@ function driveDocMap_(monthStart, exactOnly) {
 const VENDOR_ALIAS = { facebook: 'meta', celonis: 'make', realtimeboard: 'miro',
   logpayfinan: 'transdev', logpay: 'transdev',
   // Anbieter mit Kurz-Namen (<4 Buchstaben) liefern als Token das generische
-  // zweite Wort des Buchungslabels – hier auf den Markennamen mappen, z. B.:
-  // gaststaetten: 'abc' };
+  // zweite Wort des Buchungslabels – hier auf den Markennamen mappen. Gleiches
+  // gilt für über PayPal bezahlte Käufe: Auf der Karte steht dann der Name des
+  // PayPal-Empfängerkontos statt der Händler. Beispiele:
+  // gaststaetten: 'abc', vorname: 'haendler' };
   };
 
 // Erstes aussagekräftiges Wort (≥4 Buchstaben) aus einem Buchungslabel
