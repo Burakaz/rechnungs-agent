@@ -1876,6 +1876,13 @@ function extractFromPdf_(blob) {
     'Steht auf einem Beleg ein Trinkgeld/Tip separat, zähle es in "trinkgeld" zusammen und ' +
     'rechne es in "betrag" mit ein – die Bank bucht den Gesamtbetrag ab. ' +
     'Liegt nur ein einziger Beleg vor, enthält "einzelbetraege" genau diesen einen Wert.\n' +
+    'DER ABGERECHNETE BETRAG SCHLÄGT DIE RECHNUNGSSUMME: Liegt ein Karten-/Terminalbeleg ' +
+    'bei ("Kartenzahlung", "AMERICAN EXPRESS", "Betrag … EUR", "Autorisierung erfolgt") oder ' +
+    'ist auf einem Bewirtungsformular handschriftlich ein abweichender Gesamtbetrag bzw. ein ' +
+    'Trinkgeld eingetragen, dann ist DIESER Betrag der maßgebliche "betrag" – genau ihn bucht ' +
+    'die Bank ab. Beispiel: Rechnung 106,40 + Trinkgeld 8,60, Kartenbeleg/Handschrift 115,00 ' +
+    '→ betrag = "115.00", trinkgeld = "8.60", einzelbetraege = ["106.40"]. ' +
+    'Handschriftliche Ergänzungen auf dem Beleg immer mitlesen und ernst nehmen.\n' +
     'WICHTIG zum Datum: Die Belege sind DEUTSCH. Ein Datum wie 01.07.2026 oder 01/07/2026 ' +
     'bedeutet 1. Juli 2026 (Tag.Monat.Jahr) – NIEMALS als Monat/Tag lesen. Gib es als 2026-07-01 zurück. ' +
     'Bei Kassenbons/Bewirtungsbelegen ist das Belegdatum das Datum des Restaurantbesuchs bzw. Einkaufs.';
