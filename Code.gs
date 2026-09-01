@@ -224,6 +224,16 @@ function checkMissingReceipts() {
       new Date(floorStr).getTime() - 2 * 86400000));
     // Zuerst die AMEX-Verbindung prüfen – ohne sie veralten alle AMEX-Daten still
     try { pruefeAmexVerbindung_(); } catch (e) { /* nie blockieren */ }
+    // In Qonto direkt angehängte Belege ins Drive spiegeln, sonst fehlen sie
+    // der Buchhaltung im Ordner
+    try {
+      let geholt = 0;
+      [0, -1].forEach(off => {
+        geholt += holeQontoAnhaenge_(new Date(now.getFullYear(), now.getMonth() + off, 1));
+      });
+      if (geholt) notifySlack(':paperclip: *' + geholt + ' in Qonto angehängte' +
+        (geholt === 1 ? 'r Beleg' : ' Belege') + '* in den Drive-Ordner übernommen.');
+    } catch (e) { console.warn('Qonto-Anhänge fehlgeschlagen: ' + e); }
     // Dann alle Belege in die Konto-Unterordner AMEX/QONTO einsortieren + taggen
     try { sortiereBelege_(); } catch (e) { console.warn('Sortieren fehlgeschlagen: ' + e); }
     const driveMap = driveDocMap_(new Date(now.getFullYear(), now.getMonth(), 1));
@@ -1955,6 +1965,66 @@ function erstelleEigenbeleg(datumYmd, betragEur, empfaenger, zweck, zahlungsart,
   }
   notifySlack(':lower_left_fountain_pen: *Eigenbeleg erstellt:* ' + name);
   return name;
+}
+
+// ---------------------------------------------------------------------------
+// Belege spiegeln, die jemand direkt an eine Qonto-Buchung gehängt hat: Die
+// Buchhaltung arbeitet mit dem Drive-Ordner, dort fehlten diese Nachweise
+// bisher komplett (in Qonto sichtbar, im Ordner nicht). Läuft im Beleg-Check
+// über den aktuellen und den Vormonat.
+// ---------------------------------------------------------------------------
+function holeQontoAnhaenge_(monthStart) {
+  if (!CONFIG.QONTO_API_SECRET) return 0;
+  const props = PropertiesService.getScriptProperties();
+  const done = new Set(JSON.parse(props.getProperty('qontoAnhaenge') || '[]'));
+  const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+  const hashes = loadSeenHashes();
+  const from = new Date(monthStart.getTime() - 2 * 86400000);
+  const to = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
+  const ym = Utilities.formatDate(monthStart, 'Europe/Berlin', 'yyyy-MM');
+  let neu = 0, dirty = false;
+
+  alleBankKonten_().forEach(acc => {
+    if (acc.quelle === 'gocardless' || acc.status === 'closed') return;
+    kontoTransaktionen_(acc, from.toISOString(), to.toISOString()).forEach(t => {
+      const ids = t.attachment_ids || [];
+      if (!ids.length) return;
+      const datum = new Date(t.settled_at || t.emitted_at);
+      if (Utilities.formatDate(datum, 'Europe/Berlin', 'yyyy-MM') !== ym) return;
+      const betrag = Math.abs(t.amount || 0);
+      ids.forEach(aid => {
+        if (done.has(aid)) return;
+        done.add(aid); dirty = true;
+        try {
+          const meta = qontoFetch_('/v2/attachments/' + aid).attachment || {};
+          if (!meta.url) return;
+          const res = UrlFetchApp.fetch(meta.url, { muteHttpExceptions: true });
+          if (res.getResponseCode() !== 200) return;
+          let blob = res.getBlob();
+          const hash = md5hex(blob.getBytes());
+          if (hashes.has(hash)) return;          // liegt schon per Mail/GMI vor
+          if (/^image\//.test(String(blob.getContentType() || ''))) {
+            try { blob = bildZuPdf_(blob); } catch (e) { /* Original behalten */ }
+          }
+          const kTag = kontoTag_(acc);
+          const mo = monatsOrdner_(root, ym);
+          const sub = /^AMEX/i.test(kTag) ? 'AMEX' : 'QONTO';
+          const it = mo.getFoldersByName(sub);
+          const ziel = it.hasNext() ? it.next() : mo.createFolder(sub);
+          const name = eindeutigerName_(ziel,
+            Utilities.formatDate(datum, 'Europe/Berlin', 'yyyy-MM-dd') + '_' +
+            (sanitize(t.label || 'Beleg').slice(0, 40) || 'Beleg') + '_' +
+            betrag.toFixed(2) + 'EUR_' + kTag + '.pdf');
+          ziel.createFile(blob).setName(name).setDescription('rechnungs-agent:benannt');
+          hashes.add(hash); neu++;
+        } catch (e) { console.warn('Qonto-Anhang ' + aid + ': ' + e); }
+      });
+    });
+  });
+
+  if (dirty) props.setProperty('qontoAnhaenge', JSON.stringify(Array.from(done).slice(-1000)));
+  if (neu) storeSeenHashes(hashes);
+  return neu;
 }
 
 // ---------------------------------------------------------------------------
