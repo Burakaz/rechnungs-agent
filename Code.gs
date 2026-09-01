@@ -2216,7 +2216,7 @@ function beantworteSlackFragen_(kandidaten, botUser) {
         'Antworte NUR mit JSON, ohne Markdown:\n' +
         '{"ist_anfrage": true|false,  // false, wenn die Nachricht nichts von dir will\n' +
         ' "aktionen": [{"typ": "eigenbeleg", "datum": "YYYY-MM-DD", "betrag": 12.34, ' +
-        '"empfaenger": "Händler", "zweck": "Grund der Ausgabe", "konto": "AMEX-Burak"}],  // leer lassen, wenn nichts anzulegen ist\n' +
+        '"empfaenger": "Händler", "zweck": "Grund der Ausgabe", "konto": "AMEX-Vorname"}],  // leer lassen, wenn nichts anzulegen ist\n' +
         ' "antwort": "Deine Slack-Antwort auf Deutsch, per du, freundlich und knapp. ' +
         'Für jeden gefundenen Beleg schreibe den Platzhalter [[NUMMER]] (die Nummer aus der Liste) ' +
         '– daraus wird automatisch ein klickbarer Link. Nenne kurz, warum der Beleg anders heißt ' +
