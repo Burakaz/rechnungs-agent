@@ -1245,31 +1245,58 @@ function updateBelegSheets_() {
       changes.push(tab.name + ': neu angelegt (' + tab.rows.length + ' Zeilen)');
       return;
     }
-    // Kompatibilität am INHALT prüfen, nicht am Kopftext: Für den Abgleich
-    // müssen Datum und Betrag an den erwarteten Positionen liegen. Baut die
-    // Buchhaltung ein (Vormonats-)Tab auf ihre eigene Struktur um, wird es
-    // still respektiert und nicht mehr angefasst – keine Aufforderungen.
-    const probeLast = sh.getLastRow();
-    if (probeLast > 1) {
-      const probe = sh.getRange(2, 1, 1, tab.header.length).getValues()[0];
-      const datumOk = probe[2] instanceof Date ||
-        /^\d{2}\.\d{2}\.\d{4}$/.test(String(probe[2] || '').trim());
-      const betragOk = typeof (tab.amex ? probe[5] : probe[7]) === 'number';
-      if (!datumOk || !betragOk) return;
-    }
+    // Spalten am KOPFTEXT des Tabs finden statt an festen Positionen: Die
+    // Buchhaltung baut die Tabs um (zusätzliche Häkchen-Spalte, umbenannte
+    // erste Spalte). Solange Datum, Betrag und Gegenpartei benannt sind,
+    // pflegt der Agent das Tab in DEREN Struktur weiter, statt es liegen zu
+    // lassen. Fehlt eine dieser Spalten, wird das Tab in Ruhe gelassen.
+    const breite = Math.max(sh.getLastColumn(), tab.header.length);
+    const kopf = sh.getRange(1, 1, 1, breite).getValues()[0]
+      .map(x => String(x || '').trim().toLowerCase());
+    const spalte = (...namen) => {
+      for (let n = 0; n < namen.length; n++) {
+        const i = kopf.indexOf(namen[n]);
+        if (i !== -1) return i;
+      }
+      return -1;
+    };
+    const cBeleg = spalte('beleg');
+    const cDatum = spalte('datum', 'wertstellung', 'wertstellungsdatum');
+    const cBetrag = spalte('betrag');
+    const cName = tab.amex ? spalte('händler', 'haendler', 'merchant')
+                           : spalte('gegenpartei', 'name der gegenpartei');
+    if (cBeleg === -1 || cDatum === -1 || cBetrag === -1 || cName === -1) return;
+
+    // Jede Standard-Spalte auf ihre Position in DIESEM Tab abbilden
+    const mapping = tab.header.map(h => kopf.indexOf(String(h).trim().toLowerCase()));
+    const zuSheetZeile = r => {
+      const out = new Array(breite).fill('');
+      r.forEach((val, i) => { if (mapping[i] !== -1) out[mapping[i]] = val; });
+      if (mapping[0] === -1) out[0] = r[0];          // Index-Spalte umbenannt
+      out[cBeleg] = r[1];
+      out[cDatum] = r[2];
+      out[cName] = tab.amex ? r[3] : r[4];
+      out[cBetrag] = tab.amex ? r[5] : r[7];
+      return out;
+    };
+
     // Datum kann als String ODER Date-Objekt aus dem Sheet kommen
     const normDate = v => (v instanceof Date)
       ? Utilities.formatDate(v, sheetTz, 'dd.MM.yyyy') : String(v || '').trim();
+    // Schlüssel aus einer SHEET-Zeile (Spalten nach Kopftext) …
+    const keySheet = r => normDate(r[cDatum]) + '|' +
+      Number(r[cBetrag]).toFixed(2) + '|' + String(r[cName]).trim();
+    // … und aus einer frisch berechneten Zeile (immer Standard-Reihenfolge)
     const keyOf = r => normDate(r[2]) + '|' +
       Number(tab.amex ? r[5] : r[7]).toFixed(2) + '|' +
       String(tab.amex ? r[3] : r[4]).trim();
 
     const lastRow = sh.getLastRow();
-    const existing = lastRow > 1 ? sh.getRange(2, 1, lastRow - 1, tab.header.length).getValues() : [];
+    const existing = lastRow > 1 ? sh.getRange(2, 1, lastRow - 1, breite).getValues() : [];
     const exist = {};        // key -> [{sheetRow, checked}]
     existing.forEach((r, i) => {
-      const k = keyOf(r);
-      (exist[k] = exist[k] || []).push({ sheetRow: i + 2, checked: r[1] === true });
+      const k = keySheet(r);
+      (exist[k] = exist[k] || []).push({ sheetRow: i + 2, checked: r[cBeleg] === true });
     });
 
     // Pass 1: neue Transaktionen finden (Multiset-Konsum)
@@ -1295,7 +1322,7 @@ function updateBelegSheets_() {
       let delta = matchedTrue[k] - sheetTrue;
       rowsK.forEach(x => {
         if (delta > 0 && !x.checked) {
-          sh.getRange(x.sheetRow, 2).setValue(true);
+          sh.getRange(x.sheetRow, cBeleg + 1).setValue(true);
           delta--; checkedNow++;
         }
       });
@@ -1305,11 +1332,12 @@ function updateBelegSheets_() {
     if (toAppend.length) {
       toAppend.forEach((r, i) => r[0] = existing.length + i + 1);
       const startRow = lastRow + 1;
-      sh.getRange(startRow, 1, toAppend.length, tab.header.length).setValues(toAppend);
-      sh.getRange(startRow, 2, toAppend.length, 1).insertCheckboxes();
+      sh.getRange(startRow, 1, toAppend.length, breite)
+        .setValues(toAppend.map(zuSheetZeile));
+      sh.getRange(startRow, cBeleg + 1, toAppend.length, 1).insertCheckboxes();
       // insertCheckboxes setzt frisch eingefügte Kästchen auf false → true-Werte nachziehen
       toAppend.forEach((r, i) => {
-        if (r[1] === true) sh.getRange(startRow + i, 2).setValue(true);
+        if (r[1] === true) sh.getRange(startRow + i, cBeleg + 1).setValue(true);
       });
     }
     if (toAppend.length || checkedNow) {
