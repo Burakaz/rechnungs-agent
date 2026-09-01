@@ -1489,10 +1489,16 @@ function driveDocMap_(monthStart, exactOnly) {
       const files = sf.getFiles();
       while (files.hasNext()) {
         const f = files.next();
-        const m = f.getName().match(/^(\d{4}-\d{2}-\d{2})_(.+)_(\d+(?:\.\d+)?)([A-Za-z]{3})(?:_\d+)?(?:_(?:Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*)?\.pdf$/i);
+        const m = f.getName().match(/^(\d{4}-\d{2}-\d{2})_(.+?)_(\d+(?:\.\d+)?)([A-Za-z]{3})(?:_\d+Belege)?(?:_\d+)?(?:_(?:Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*)?\.pdf$/i);
         if (!m) continue;
+        // Sammelscan: die Einzelbeträge stehen in der Beschreibung
+        let teile = [];
+        try {
+          const tm = String(f.getDescription() || '').match(/betraege=([\d.,]+)/);
+          if (tm) teile = tm[1].split(',').map(parseFloat).filter(x => x > 0);
+        } catch (e) { /* ohne Einzelbeträge zählt nur die Summe */ }
         entries.push({ time: new Date(m[1]).getTime(), vendor: m[2].toLowerCase(),
-          amount: parseFloat(m[3]), cur: m[4].toUpperCase(), used: false,
+          amount: parseFloat(m[3]), cur: m[4].toUpperCase(), used: false, teile: teile,
           file: f, monthFolder: monthFolder, inSub: sf.getId() !== monthFolder.getId() });
       }
     });
@@ -1538,6 +1544,11 @@ function driveHasDoc_(entries, amountAbs, dateMs, label, kontoTag) {
     let ok = false;
     if (e.cur === 'EUR') {
       ok = Math.abs(e.amount - amountAbs) < 0.005;
+      // Sammelscan (mehrere Quittungen auf einem Bild): Auch eine einzelne
+      // davon kann genau diese Buchung sein
+      if (!ok && e.teile && e.teile.length > 1) {
+        ok = e.teile.some(t => Math.abs(t - amountAbs) < 0.005);
+      }
       // Trinkgeld-Fall (Bewirtung): die Kartenzahlung liegt bis zu 20 % über
       // dem Bon-Betrag – nur mit Anbieter-Match zulassen
       if (!ok && mitTrinkgeld && tokenOk && amountAbs > e.amount && amountAbs / e.amount <= 1.2) ok = true;
@@ -1599,7 +1610,7 @@ function processDriveUploads() {
   const MARKER = 'rechnungs-agent:benannt';
   const startTime = Date.now();
   const MAX_RUNTIME_MS = 270 * 1000;
-  const conv = /^\d{4}-\d{2}-\d{2}_.+_\d+(?:\.\d+)?[A-Za-z]{3}(?:_\d+)?(?:_(?:Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*)?\.pdf$/i;
+  const conv = /^\d{4}-\d{2}-\d{2}_.+_\d+(?:\.\d+)?[A-Za-z]{3}(?:_\d+Belege)?(?:_\d+)?(?:_(?:Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*)?\.pdf$/i;
   const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
   const now = new Date();
 
@@ -1653,12 +1664,19 @@ function processDriveUploads() {
         const vendor = sanitize(meta.anbieter || 'Unbekannt');
         const nummer = meta.rechnungsnummer ? '_' + sanitize(meta.rechnungsnummer) : '';
         const amount = meta.betrag ? '_' + meta.betrag + (meta.waehrung || 'EUR') : '';
+        // Mehrere Quittungen auf einem Scan (zwei Restaurantrechnungen, vier
+        // Tankbelege …): Der Name trägt die SUMME – so trifft er die eine
+        // Kartenzahlung – und die Einzelbeträge landen in der Beschreibung,
+        // damit der Abgleich auch einen einzelnen Teilbetrag wiederfindet.
+        const einzel = (meta.einzelbetraege || []).map(x => Number(x))
+          .filter(x => x > 0).map(x => x.toFixed(2));
+        const mehr = einzel.length > 1 ? '_' + einzel.length + 'Belege' : '';
         // Liegt die Datei schon in einem Konto-Unterordner, bleibt sie dort –
         // nur der Name wird korrigiert; den Konto-Tag hängt der Abgleich an.
         const ziel = entry.inSub ? entry.f : monatsOrdner_(root, ymd.slice(0, 7));
-        const name = eindeutigerName_(ziel, ymd + '_' + vendor + nummer + amount + '.pdf', f.getId());
+        const name = eindeutigerName_(ziel, ymd + '_' + vendor + nummer + amount + mehr + '.pdf', f.getId());
         if (f.getName() !== name) f.setName(name);
-        f.setDescription(MARKER);
+        f.setDescription(MARKER + (einzel.length > 1 ? ';betraege=' + einzel.join(',') : ''));
         if (!entry.inSub && f.getParents().next().getId() !== ziel.getId()) f.moveTo(ziel);
         neu++;
       } catch (e) {
@@ -1846,15 +1864,24 @@ function extractFromPdf_(blob) {
     ' "rechnungsnummer": "RE-2026-123 oder null",\n' +
     ' "betrag": "123.45",\n' +
     ' "waehrung": "EUR",\n' +
-    ' "rechnungsdatum": "YYYY-MM-DD oder null"}\n' +
+    ' "rechnungsdatum": "YYYY-MM-DD oder null",\n' +
+    ' "einzelbetraege": ["123.45"],  // siehe unten – bei nur EINEM Beleg genau ein Wert\n' +
+    ' "trinkgeld": "0.00"}\n' +
     'betrag = der tatsächlich zu zahlende Endbetrag (Brutto-Summe) mit Punkt als ' +
     'Dezimaltrenner. NIEMALS Gegenstandswert, Streitwert, Kontostand oder Zwischensummen verwenden.\n' +
+    'MEHRERE BELEGE AUF EINEM SCAN: Oft sind mehrere Quittungen zusammen abfotografiert ' +
+    '(zwei Restaurantrechnungen, vier Tankbelege …), die zusammen mit EINER Kartenzahlung ' +
+    'beglichen wurden. Erfasse dann in "einzelbetraege" JEDEN Endbetrag einzeln (in der ' +
+    'Reihenfolge auf dem Scan) und setze "betrag" auf die SUMME aller Einzelbeträge. ' +
+    'Steht auf einem Beleg ein Trinkgeld/Tip separat, zähle es in "trinkgeld" zusammen und ' +
+    'rechne es in "betrag" mit ein – die Bank bucht den Gesamtbetrag ab. ' +
+    'Liegt nur ein einziger Beleg vor, enthält "einzelbetraege" genau diesen einen Wert.\n' +
     'WICHTIG zum Datum: Die Belege sind DEUTSCH. Ein Datum wie 01.07.2026 oder 01/07/2026 ' +
     'bedeutet 1. Juli 2026 (Tag.Monat.Jahr) – NIEMALS als Monat/Tag lesen. Gib es als 2026-07-01 zurück. ' +
     'Bei Kassenbons/Bewirtungsbelegen ist das Belegdatum das Datum des Restaurantbesuchs bzw. Einkaufs.';
   const payload = {
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 300,
+    max_tokens: 600,
     messages: [{
       role: 'user',
       content: [
