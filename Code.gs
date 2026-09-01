@@ -195,6 +195,12 @@ function setup() {
   if (CONFIG.QONTO_API_SECRET || CONFIG.GOCARDLESS_SECRET_ID) {
     ScriptApp.newTrigger('monthlyBelegReport').timeBased().onMonthDay(1).atHour(7).create();
   }
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'slackWatch') ScriptApp.deleteTrigger(t);
+  });
+  if (CONFIG.SLACK_BOT_TOKEN && CONFIG.SLACK_CHANNEL_ID) {
+    ScriptApp.newTrigger('slackWatch').timeBased().everyMinutes(5).create();
+  }
   seedHashes();
   processInvoices();
 }
@@ -297,6 +303,19 @@ function checkMissingReceipts() {
       if (now.getTime() - (reminders[k].last || 0) > 60 * 86400000) delete reminders[k];
     });
     props.setProperty('belegReminders', JSON.stringify(reminders));
+
+    // Offene Posten für den Slack-Agenten zwischenspeichern: Bittet jemand im
+    // Kanal um einen Eigenbeleg ("für das Essen am 10.08."), findet er so die
+    // passende Buchung, ohne die Bank-APIs erneut abzufragen.
+    try {
+      props.setProperty('offenePosten', JSON.stringify(
+        offen.filter(o => !o.gedeckt).map(o => ({
+          d: Utilities.formatDate(o.datum, 'Europe/Berlin', 'yyyy-MM-dd'),
+          a: Number(o.betrag.toFixed(2)),
+          v: String(o.label || '').slice(0, 40),
+          k: kontoTag_(o.acc),
+        })).slice(0, 60)));
+    } catch (e) { /* Cache ist Komfort, nie blockieren */ }
 
     // BelegCheck-Sheet des laufenden Monats bei jedem Check aktuell halten
     try { updateBelegSheets_(); } catch (e) {
@@ -1981,6 +2000,13 @@ function bildZuPdf_(blob) {
   return Utilities.newBlob(html, 'text/html', 'beleg.html').getAs('application/pdf');
 }
 
+// Eigener Einstieg für den Kurz-Takt: Der Kanal wird alle paar Minuten
+// abgefragt, damit Uploads und Aufgaben zeitnah bearbeitet werden statt erst
+// beim stündlichen Lauf. Ohne neue Nachrichten kostet das nur zwei API-Calls.
+function slackWatch() {
+  pullSlackBelege();
+}
+
 // Bot-Zugang kaputt (Token rotiert/abgelaufen, Bot aus dem Channel entfernt):
 // Das meldet der Agent über den unabhängigen Webhook, sonst bleibt es still –
 // er könnte den Kanal dann nicht mehr lesen und niemand würde es merken.
@@ -2150,9 +2176,17 @@ function beantworteSlackFragen_(kandidaten, botUser) {
   const idx = belegIndex_(4);
   const liste = idx.map((e, i) => '[' + i + '] ' + e.n + '  (' + e.ort + ')').join('\n');
   const fehler = JSON.parse(props.getProperty('slackFragenFehler') || '{}');
+  // Offene Posten aus dem letzten Beleg-Check – Grundlage für Eigenbelege
+  let offeneListe = '(keine Liste verfügbar)';
+  try {
+    const op = JSON.parse(props.getProperty('offenePosten') || '[]');
+    if (op.length) {
+      offeneListe = op.map(o => o.d + ' | ' + o.a.toFixed(2) + ' EUR | ' + o.v + ' | ' + o.k).join('\n');
+    } else { offeneListe = '(aktuell keine offenen Posten)'; }
+  } catch (e) { /* ohne Liste antwortet das Modell eben ohne Buchungsbezug */ }
 
   fragen.forEach(m => {
-    let antwort = null, gescheitert = false;
+    let antwort = null, gescheitert = false, aktionen = null;
     try {
 
       const prompt =
@@ -2167,8 +2201,22 @@ function beantworteSlackFragen_(kandidaten, botUser) {
         '• Belege in USD tragen den USD-Betrag, abgebucht wurde in EUR (z. B. 161.50USD ≈ 144 €).\n' +
         '• Trinkgeld: Der Bewirtungsbeleg kann kleiner sein als die Abbuchung.\n' +
         'Ordne jeden gesuchten Posten so gut wie möglich zu. Sei ehrlich, wenn nichts passt.\n\n' +
+        'Abbuchungen, für die noch KEIN Beleg da ist (Datum | Betrag | Händler | Konto):\n' +
+        offeneListe + '\n\n' +
+        'Du kannst nicht nur antworten, sondern auch HANDELN: Bittet jemand um einen ' +
+        'Eigenbeleg (Ersatzbeleg für eine Ausgabe ohne Originalrechnung), leg ihn an. ' +
+        'Regeln dafür:\n' +
+        '• Nur wenn eindeutig ist, um welche Abbuchung(en) es geht – nimm Datum, Betrag, ' +
+        'Händler und Konto aus der Liste oben. Passt nichts eindeutig, frage in der Antwort nach ' +
+        'statt zu raten.\n' +
+        '• Der Zweck muss aus der Nachricht hervorgehen (z. B. "Bewirtung mit Kunde X", ' +
+        '"Verpflegung Team beim Dreh"). Fehlt er, frag danach und lege NICHTS an.\n' +
+        '• Bittet jemand pauschal um Eigenbelege für mehrere Posten, lege sie für die klar ' +
+        'benannten an (höchstens 5 pro Nachricht).\n\n' +
         'Antworte NUR mit JSON, ohne Markdown:\n' +
         '{"ist_anfrage": true|false,  // false, wenn die Nachricht nichts von dir will\n' +
+        ' "aktionen": [{"typ": "eigenbeleg", "datum": "YYYY-MM-DD", "betrag": 12.34, ' +
+        '"empfaenger": "Händler", "zweck": "Grund der Ausgabe", "konto": "AMEX-Burak"}],  // leer lassen, wenn nichts anzulegen ist\n' +
         ' "antwort": "Deine Slack-Antwort auf Deutsch, per du, freundlich und knapp. ' +
         'Für jeden gefundenen Beleg schreibe den Platzhalter [[NUMMER]] (die Nummer aus der Liste) ' +
         '– daraus wird automatisch ein klickbarer Link. Nenne kurz, warum der Beleg anders heißt ' +
@@ -2197,7 +2245,10 @@ function beantworteSlackFragen_(kandidaten, botUser) {
       const json = roh.replace(/```json|```/g, '').trim();
       if (!json) throw new Error('leere Antwort');
       const data = JSON.parse(json);
-      if (data.ist_anfrage && data.antwort) antwort = String(data.antwort);
+      if (data.ist_anfrage) {
+        if (data.antwort) antwort = String(data.antwort);
+        if (Array.isArray(data.aktionen)) aktionen = data.aktionen;
+      }
     } catch (e) {
       console.warn('Slack-Frage nicht beantwortbar: ' + e);
       gescheitert = true;
@@ -2212,6 +2263,27 @@ function beantworteSlackFragen_(kandidaten, botUser) {
     }
     done.add(m.ts);
     delete fehler[m.ts];
+
+    // Aufgaben ausführen. Bewusst nur Eigenbelege: Sie erzeugen ein Dokument
+    // und sonst nichts – keine Zahlungen, keine Weiterleitungen, kein Löschen.
+    const erledigt = [];
+    (aktionen || []).slice(0, 5).forEach(a => {
+      if (!a || a.typ !== 'eigenbeleg') return;
+      const betrag = Number(a.betrag);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(a.datum || '')) || !(betrag > 0) ||
+          !a.empfaenger || !a.zweck) return;
+      try {
+        const zart = /^AMEX/i.test(String(a.konto || ''))
+          ? 'Kreditkarte (AMEX)' : 'Qonto-Konto (Lastschrift/Überweisung)';
+        erledigt.push(erstelleEigenbeleg(a.datum, betrag, String(a.empfaenger),
+          String(a.zweck), zart, String(a.konto || '')));
+      } catch (e) { console.warn('Eigenbeleg aus Slack fehlgeschlagen: ' + e); }
+    });
+    if (erledigt.length) {
+      antwort = (antwort || 'Erledigt.') + '\n\n:lower_left_fountain_pen: *Angelegt:*\n• ' +
+        erledigt.join('\n• ');
+    }
+
     if (!antwort) return;
 
     // Platzhalter [[n]] durch echte Drive-Links ersetzen (nur gültige Nummern)
