@@ -746,7 +746,13 @@ const MAIL_BELEG_BETREFF = 'Rechnung OR Receipt OR Invoice OR Quittung OR Zahlun
 // Mailkörper rendern. Liefert null, wenn die Mail nicht nach Beleg aussieht.
 function belegAusMailKoerper_(message) {
   const subject = message.getSubject() || '';
-  if (!/rechnung|receipt|invoice|quittung|zahlungsbeleg|zahlungsbest|payment|zahlung|bestellbest|order confirmation|fahrtbeleg/i.test(subject)) return null;
+  // Kontobenachrichtigungen sind keine Belege: Qonto/AMEX melden jede Buchung
+  // per Mail („Zahlung erhalten", „Lastschrift eingereicht") – die haben zwar
+  // „Zahlung" im Betreff, aber keinen Rechnungsinhalt
+  const absender = senderDomain(message);
+  if (/qonto\.com|americanexpress|amex\.|\.bank$|sparkasse|commerzbank|n26\.com/i.test(absender)) return null;
+  if (/kontoauszug|transaktion|umsatz|lastschrift eingereicht|zahlung (erhalten|ausgeführt|eingegangen|unterwegs)|überweisung (erhalten|ausgeführt)|kartenzahlung/i.test(subject)) return null;
+  if (!/rechnung|receipt|invoice|quittung|zahlungsbeleg|zahlungsbest|payment (confirmation|receipt)|your payment|deine zahlung|ihre zahlung|bestellbest|order confirmation|fahrtbeleg|trip receipt/i.test(subject)) return null;
   const html = message.getBody() || '';
   const name = (sanitize(subject).slice(0, 60) || 'Beleg') + '.pdf';
 
@@ -790,7 +796,7 @@ function processInvoices(queryOverride, ignoreProcessed) {
   // im Mailtext oder als Link stecken (Uber, Canva, Fireflies, Meta, IONOS,
   // Stripe-Versender). Letztere fielen bisher komplett durch.
   const query = queryOverride || ('{filename:pdf subject:(' + MAIL_BELEG_BETREFF + ')} newer_than:' +
-    CONFIG.SEARCH_DAYS + 'd -in:sent -in:trash -in:spam');
+    CONFIG.SEARCH_DAYS + 'd -from:qonto.com -in:sent -in:trash -in:spam');
   // Gmail liefert pro Aufruf max. 100 Threads → paginieren (Deckel 500)
   let threads = [];
   for (let start = 0; ; start += 100) {
