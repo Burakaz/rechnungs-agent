@@ -752,7 +752,7 @@ function belegAusMailKoerper_(message) {
   const absender = senderDomain(message);
   if (/qonto\.com|americanexpress|amex\.|\.bank$|sparkasse|commerzbank|n26\.com/i.test(absender)) return null;
   if (/kontoauszug|transaktion|umsatz|lastschrift eingereicht|zahlung (erhalten|ausgeführt|eingegangen|unterwegs)|überweisung (erhalten|ausgeführt)|kartenzahlung/i.test(subject)) return null;
-  if (!/rechnung|receipt|invoice|quittung|zahlungsbeleg|zahlungsbest|payment (confirmation|receipt)|your payment|deine zahlung|ihre zahlung|bestellbest|order confirmation|fahrtbeleg|trip receipt|trip with|fahrt mit/i.test(subject)) return null;
+  if (!/rechnung|receipt|invoice|quittung|zahlungsbeleg|zahlungsbest|payment (confirmation|receipt)|your payment|deine zahlung|ihre zahlung|bestellbest|order confirmation|fahrtbeleg|trip receipt|trip with|fahrt mit|uber eats/i.test(subject)) return null;
   const html = message.getBody() || '';
   const name = (sanitize(subject).slice(0, 60) || 'Beleg') + '.pdf';
 
