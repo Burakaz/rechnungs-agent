@@ -735,6 +735,49 @@ function seedHashes() {
 // ignoreProcessed: true = bereits als "verarbeitet" markierte Mails erneut
 // prüfen (Reparatur-Läufe, z. B. nach einem Filter-Bugfix). Hash-Dedupe
 // verhindert dabei Doppelablagen.
+// Betreffwörter, an denen eine Quittungs-Mail ohne PDF-Anhang erkannt wird
+// (Gmail-Suchsyntax, wird in subject:(…) eingesetzt)
+const MAIL_BELEG_BETREFF = 'Rechnung OR Receipt OR Invoice OR Quittung OR Zahlungsbeleg OR ' +
+  'Zahlungsbestätigung OR Zahlungsbestaetigung OR "payment confirmation" OR "Your payment" OR ' +
+  '"Deine Zahlung" OR "Ihre Zahlung" OR "Order confirmation" OR Bestellbestätigung OR "Trip receipt" OR Fahrtbeleg';
+
+// Aus einer Quittungs-Mail ohne PDF-Anhang ein PDF machen: Zuerst verlinkte
+// PDFs versuchen (Stripe "Download invoice", Portal-Links), sonst den
+// Mailkörper rendern. Liefert null, wenn die Mail nicht nach Beleg aussieht.
+function belegAusMailKoerper_(message) {
+  const subject = message.getSubject() || '';
+  if (!/rechnung|receipt|invoice|quittung|zahlungsbeleg|zahlungsbest|payment|zahlung|bestellbest|order confirmation|fahrtbeleg/i.test(subject)) return null;
+  const html = message.getBody() || '';
+  const name = (sanitize(subject).slice(0, 60) || 'Beleg') + '.pdf';
+
+  // 1) Verlinktes PDF
+  const links = (html.match(/https?:\/\/[^\s"'<>)]+/g) || [])
+    .map(u => u.replace(/&amp;/g, '&'))
+    .filter(u => /\.pdf(\?|$)|\/pdf(\?|$)|invoice[^\s]*\/pdf|receipt[^\s]*\/pdf/i.test(u))
+    .slice(0, 3);
+  for (let i = 0; i < links.length; i++) {
+    try {
+      const res = UrlFetchApp.fetch(links[i], { muteHttpExceptions: true, followRedirects: true });
+      const h = res.getHeaders();
+      const ct = String(h['Content-Type'] || h['content-type'] || '');
+      if (res.getResponseCode() === 200 && /pdf/i.test(ct)) return res.getBlob().setName(name);
+    } catch (e) { /* nächster Link */ }
+  }
+
+  // 2) Mailkörper als PDF (Skripte/Styles raus, Kopfzeile mit Absender/Datum dazu)
+  const esc = t => String(t || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const body = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
+  const seite = '<html><body style="font-family:sans-serif;font-size:13px">' +
+    '<p style="font-size:11px;color:#666">Von: ' + esc(message.getFrom()) + ' · ' +
+    esc(message.getDate()) + '<br>Betreff: ' + esc(subject) + '</p><hr>' + body + '</body></html>';
+  try {
+    return Utilities.newBlob(seite, 'text/html', 'beleg.html').getAs('application/pdf').setName(name);
+  } catch (e) {
+    console.warn('Mailkörper→PDF fehlgeschlagen: ' + e);
+    return null;
+  }
+}
+
 function processInvoices(queryOverride, ignoreProcessed) {
   const labelDone = getOrCreateLabel(CONFIG.LABEL_DONE);
   const labelReview = getOrCreateLabel(CONFIG.LABEL_REVIEW);
@@ -743,8 +786,11 @@ function processInvoices(queryOverride, ignoreProcessed) {
   const startTime = Date.now();
   const MAX_RUNTIME_MS = 270 * 1000; // 4,5 min – Rest übernimmt der nächste Lauf
 
-  const query = queryOverride || ('has:attachment filename:pdf newer_than:' + CONFIG.SEARCH_DAYS +
-    'd -in:sent -in:trash -in:spam');
+  // Zwei Sorten Belegmails: klassisch mit PDF-Anhang – und Quittungen, die nur
+  // im Mailtext oder als Link stecken (Uber, Canva, Fireflies, Meta, IONOS,
+  // Stripe-Versender). Letztere fielen bisher komplett durch.
+  const query = queryOverride || ('{filename:pdf subject:(' + MAIL_BELEG_BETREFF + ')} newer_than:' +
+    CONFIG.SEARCH_DAYS + 'd -in:sent -in:trash -in:spam');
   // Gmail liefert pro Aufruf max. 100 Threads → paginieren (Deckel 500)
   let threads = [];
   for (let start = 0; ; start += 100) {
@@ -764,9 +810,16 @@ function processInvoices(queryOverride, ignoreProcessed) {
 
       // Manche Versender (z. B. flaschenpost via Mailjet) deklarieren PDFs als
       // application/octet-stream → Dateiname .pdf zählt genauso.
-      const pdfs = message.getAttachments({ includeInlineImages: false })
+      let pdfs = message.getAttachments({ includeInlineImages: false })
         .filter(a => a.getContentType() === 'application/pdf' || /\.pdf$/i.test(a.getName()));
-      if (pdfs.length === 0) { processedIds.add(msgId); continue; }
+      if (pdfs.length === 0) {
+        // Quittung ohne PDF-Anhang: erst nach einem verlinkten PDF greifen,
+        // sonst den Mailtext selbst als PDF ablegen – die Buchhaltung braucht
+        // ein Dokument, keine Mail
+        const synth = belegAusMailKoerper_(message);
+        if (!synth) { processedIds.add(msgId); continue; }
+        pdfs = [synth];
+      }
 
       const result = classifyMessage(message, pdfs[0]);
 
