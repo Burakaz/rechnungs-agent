@@ -745,7 +745,8 @@ const MAIL_BELEG_BETREFF = 'Rechnung OR Receipt OR Invoice OR Quittung OR Zahlun
 // PDFs versuchen (Stripe "Download invoice", Portal-Links), sonst den
 // Mailkörper rendern. Liefert null, wenn die Mail nicht nach Beleg aussieht.
 function belegAusMailKoerper_(message) {
-  const subject = message.getSubject() || '';
+  // Geschützte Leerzeichen (Uber schreibt „Uber Eats" mit NBSP) normalisieren
+  const subject = (message.getSubject() || '').replace(/\u00a0/g, ' ');
   // Kontobenachrichtigungen sind keine Belege: Qonto/AMEX melden jede Buchung
   // per Mail („Zahlung erhalten", „Lastschrift eingereicht") – die haben zwar
   // „Zahlung" im Betreff, aber keinen Rechnungsinhalt
@@ -939,7 +940,12 @@ function classifyMessage(message, pdf) {
 
 function classifyWithClaude(message, pdf) {
   const prompt =
-    'Du bekommst eine E-Mail und ein PDF. Analysiere, ob es eine Rechnung ist.\n' +
+    'Du bekommst eine E-Mail und ein PDF. Analysiere, ob es ein Beleg ist. Als Rechnung ' +
+    '(ist_rechnung=true) zählen auch Quittungen, Zahlungs- und Kartenbelege, Fahrt- und ' +
+    'Bestellbelege (Uber, Uber Eats, Bolt, Bahn), Abo- und Nutzungsabrechnungen sowie Receipts ' +
+    'von Stripe oder App-Stores – alles, was eine bezahlte Leistung mit Betrag belegt. ' +
+    'ist_rechnung=false NUR bei Werbung, Newslettern, Gutschein-Aktionen, Kontobenachrichtigungen ' +
+    'und reinen Gebührenübersichten, die ausdrücklich "kein Zahlungsbeleg" sind.\n' +
     'E-Mail-Absender: ' + message.getFrom() + '\n' +
     'Betreff: ' + message.getSubject() + '\n' +
     'Mailtext (Anfang): ' + message.getPlainBody().slice(0, 1500) + '\n\n' +
