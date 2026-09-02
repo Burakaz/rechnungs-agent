@@ -1579,7 +1579,8 @@ const VENDOR_ALIAS = { facebook: 'meta', celonis: 'make', realtimeboard: 'miro',
   // gilt für über PayPal bezahlte Käufe: Auf der Karte steht dann der Name des
   // PayPal-Empfängerkontos statt der Händler. Beispiele:
   // gaststaetten: 'abc', vorname: 'haendler' };
-  };
+  // xAI rechnet auf der Karte als "GROK XAI" ab, die Rechnung kommt von x.ai
+  grok: 'x.ai' };
 
 // Erstes aussagekräftiges Wort (≥4 Buchstaben) aus einem Buchungslabel
 function vendorToken_(label) {
