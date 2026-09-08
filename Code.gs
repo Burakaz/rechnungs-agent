@@ -2022,7 +2022,7 @@ function erstelleEigenbeleg(datumYmd, betragEur, empfaenger, zweck, zahlungsart,
   const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
   grund = grund || 'Vom Zahlungsempfänger wurde kein Beleg ausgestellt bzw. der Beleg ist nicht mehr vorhanden';
   const aussteller = CONFIG.EIGENBELEG_AUSSTELLER || 'Max Mustermann, Geschäftsführer';
-  const firma = CONFIG.EIGENBELEG_FIRMA || 'ADMKRS GmbH';
+  const firma = CONFIG.EIGENBELEG_FIRMA || 'Muster GmbH';
 
   let sigHtml = '<div style="height:60px"></div>';
   const sigIt = root.getFilesByName('Unterschrift.png');
@@ -2077,6 +2077,158 @@ function erstelleEigenbeleg(datumYmd, betragEur, empfaenger, zweck, zahlungsart,
     }
   }
   notifySlack(':lower_left_fountain_pen: *Eigenbeleg erstellt:* ' + name);
+  return name;
+}
+
+
+// ---------------------------------------------------------------------------
+// Bewirtungsbeleg (§ 4 Abs. 5 S. 1 Nr. 2 EStG, R 4.10 Abs. 8 EStR):
+// Erzeugt das Bewirtungsblatt mit allen Pflichtangaben (Ort, Tag, Teilnehmer,
+// Anlass, Höhe) und digitaler Unterschrift. Zwei Betriebsarten:
+//   1. Ohne Originalbeleg  -> eigenständiger Ersatzbeleg (Eigenbeleg-Charakter).
+//   2. Mit vorhandenem Scan -> das Bewirtungsblatt wird NEBEN den Beleg gesetzt
+//      und beides zu EINER PDF-Datei zusammengeführt (BMF 19.11.2025: der
+//      Eigenbeleg muss digital mit der Bewirtungsrechnung zusammengefügt sein).
+//      Bild-Scans (JPG/PNG) werden eingebettet; liegt der Beleg als PDF vor,
+//      lässt Apps Script kein Zusammenführen zu: dann entsteht das Blatt als
+//      eigene Datei mit gleichem Namensstamm und gegenseitigem Verweis.
+// Aufruf im Editor, z. B.:
+//   erstelleBewirtungsbeleg({ datum: '2026-08-08', betrag: 77.00,
+//     gaststaette: 'Restaurant Muster', ort: 'München',
+//     teilnehmer: ['Vorname Nachname (Firma)', 'Max Mustermann (Muster GmbH)'],
+//     anlass: 'Kundenbesprechung Projekt X',
+//     zahlungsart: 'Kartenzahlung Qonto Hauptkonto', kontoTag: 'Qonto-Hauptkonto',
+//     beleg: 'Dateiname-oder-Drive-ID des Scans' })
+// ---------------------------------------------------------------------------
+function erstelleBewirtungsbeleg(o) {
+  o = o || {};
+  const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+  const aussteller = CONFIG.EIGENBELEG_AUSSTELLER || 'Max Mustermann, Geschäftsführer';
+  const firma = CONFIG.EIGENBELEG_FIRMA || 'Muster GmbH';
+  const datumYmd = String(o.datum || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datumYmd)) throw new Error('datum muss YYYY-MM-DD sein');
+  const gesamt = Number(o.betrag || 0);
+  if (!gesamt) throw new Error('betrag fehlt');
+  const trinkgeld = Number(o.trinkgeld || 0);
+  const teilnehmer = (Array.isArray(o.teilnehmer) ? o.teilnehmer : String(o.teilnehmer || '').split(/\s*[;,]\s*/))
+    .map(t => String(t || '').trim()).filter(Boolean);
+  if (teilnehmer.length < 1) throw new Error('teilnehmer fehlen');
+  const anlass = String(o.anlass || '').trim();
+  if (!anlass) throw new Error('anlass fehlt');
+  const gaststaette = String(o.gaststaette || '').trim();
+  const ort = String(o.ort || 'München').trim();
+
+  // Vorhandenen Scan suchen (Drive-ID oder Dateiname)
+  let belegDatei = null, belegBild = null;
+  if (o.beleg) {
+    try { belegDatei = DriveApp.getFileById(String(o.beleg)); }
+    catch (e) {
+      const it = root.getFilesByName(String(o.beleg));
+      if (it.hasNext()) belegDatei = it.next();
+      else {
+        const gefunden = DriveApp.getFilesByName(String(o.beleg));
+        if (gefunden.hasNext()) belegDatei = gefunden.next();
+      }
+    }
+    if (!belegDatei) throw new Error('Beleg nicht gefunden: ' + o.beleg);
+    const mt = String(belegDatei.getMimeType() || '');
+    if (/^image\//.test(mt)) {
+      const b = belegDatei.getBlob();
+      belegBild = 'data:' + b.getContentType() + ';base64,' + Utilities.base64Encode(b.getBytes());
+    }
+  }
+
+  let sigHtml = '<div style="height:56px"></div>';
+  const sigIt = root.getFilesByName('Unterschrift.png');
+  if (sigIt.hasNext()) {
+    const sb = sigIt.next().getBlob();
+    sigHtml = '<img src="data:' + sb.getContentType() + ';base64,' +
+      Utilities.base64Encode(sb.getBytes()) + '" style="height:56px" />';
+  }
+
+  const dd = datumYmd.slice(8, 10) + '.' + datumYmd.slice(5, 7) + '.' + datumYmd.slice(0, 4);
+  const heute = Utilities.formatDate(new Date(), 'Europe/Berlin', 'dd.MM.yyyy');
+  const eur = n => n.toFixed(2).replace('.', ',') + ' EUR';
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const zeile = (k, v) =>
+    '<tr><td style="padding:5px 12px 5px 0;color:#666;white-space:nowrap;vertical-align:top">' + k +
+    '</td><td style="padding:5px 0;font-weight:bold">' + v + '</td></tr>';
+
+  const rechnungBei = !!belegDatei;
+  const angaben =
+    '<table style="font-size:11.5px;width:100%">' +
+    zeile('Bewirtender', esc(aussteller) + ', ' + esc(firma)) +
+    zeile('Gaststätte / Ort', esc(gaststaette || '–') + (ort ? ', ' + esc(ort) : '')) +
+    zeile('Tag der Bewirtung', dd) +
+    zeile('Bewirtete Personen', teilnehmer.map(esc).join('<br>')) +
+    zeile('Anlass der Bewirtung', esc(anlass)) +
+    (trinkgeld ? zeile('davon Trinkgeld', eur(trinkgeld)) : '') +
+    zeile('Höhe der Aufwendungen', eur(gesamt) + ' (brutto)') +
+    zeile('Zahlungsart', esc(o.zahlungsart || '–')) +
+    zeile('Art der Bewirtung', 'geschäftlich veranlasst (§ 4 Abs. 5 S. 1 Nr. 2 EStG, 70 % abziehbar)') +
+    zeile('Bewirtungsrechnung', rechnungBei
+      ? 'liegt bei: ' + esc(belegDatei.getName())
+      : 'liegt nicht vor – Rechnung der Gaststätte wird nachgereicht') +
+    '</table>' +
+    '<p style="color:#999;font-size:9.5px;margin-top:16px">Die vorstehenden Angaben zu Anlass und ' +
+    'Teilnehmern der Bewirtung mache ich eigenhändig und versichere ihre Richtigkeit.' +
+    (rechnungBei ? '' : ' Für diese Bewirtung liegt keine Rechnung der Gaststätte vor; ' +
+      'dieser Beleg dient als Ersatznachweis.') + '</p>' +
+    '<p style="margin-top:22px">' + esc(ort) + ', den ' + heute + '</p>' + sigHtml +
+    '<table style="margin-top:4px"><tr><td style="border-top:1px solid #111;padding-top:4px;min-width:230px">' +
+    esc(aussteller) + ', ' + esc(firma) + '</td></tr></table>';
+
+  const kopf =
+    '<table width="100%" style="border-bottom:2px solid #111;padding-bottom:8px"><tr>' +
+    '<td style="font-size:19px;font-weight:bold;letter-spacing:1px">BEWIRTUNGSBELEG</td>' +
+    '<td align="right" style="font-size:11px;color:#666">' + esc(firma) + '</td></tr></table>' +
+    '<p style="color:#666;margin:8px 0 18px;font-size:11px">Nachweis der Bewirtungsaufwendungen nach ' +
+    '§ 4 Abs. 5 Satz 1 Nr. 2 EStG in Verbindung mit R 4.10 Abs. 8 EStR</p>';
+
+  // Mit Bild-Scan: Beleg links, Angaben daneben. Sonst nur die Angaben.
+  const html = '<html><body style="font-family:Helvetica,Arial,sans-serif;font-size:11.5px;color:#111;margin:32px 36px">' +
+    kopf + (belegBild
+      ? '<table width="100%" style="table-layout:fixed"><tr>' +
+        '<td width="42%" style="vertical-align:top;padding-right:20px;border-right:1px solid #ddd">' +
+        '<div style="color:#666;font-size:10px;margin-bottom:6px">Beleg der Gaststätte</div>' +
+        '<img src="' + belegBild + '" style="width:100%" /></td>' +
+        '<td style="vertical-align:top;padding-left:20px">' + angaben + '</td></tr></table>'
+      : angaben) +
+    '</body></html>';
+
+  const pdf = Utilities.newBlob(html, 'text/html', 'bewirtung.html').getAs('application/pdf');
+  const mo = monatsOrdner_(root, datumYmd.slice(0, 7));
+  const base = datumYmd + '_Bewirtung-' + sanitize(gaststaette || 'Bewirtung').slice(0, 40) + '_' +
+    gesamt.toFixed(2) + 'EUR' + (o.kontoTag ? '_' + o.kontoTag : '');
+  let name = base + '.pdf';
+  let n = 2;
+  while (mo.getFilesByName(name).hasNext()) name = base + '_' + (n++) + '.pdf';
+  const file = mo.createFile(pdf).setName(name);
+  file.setDescription('rechnungs-agent:benannt' + (belegDatei ? ';bewirtung_zu=' + belegDatei.getId() : ''));
+  if (o.kontoTag) {
+    const subName = /^AMEX/i.test(o.kontoTag) ? 'AMEX' : (/^Qonto/i.test(o.kontoTag) ? 'QONTO' : null);
+    if (subName) {
+      const it = mo.getFoldersByName(subName);
+      file.moveTo(it.hasNext() ? it.next() : mo.createFolder(subName));
+    }
+  }
+
+  // Original: Bild-Scans stecken jetzt vollständig im neuen PDF und wandern in
+  // den Duplikate-Ordner; PDF-Belege bleiben liegen und bekommen den Verweis.
+  let hinweis = '';
+  if (belegDatei) {
+    belegDatei.setDescription(String(belegDatei.getDescription() || '') + ';bewirtungsblatt=' + file.getId());
+    if (belegBild) {
+      try {
+        const dIt = mo.getFoldersByName('Duplikate');
+        belegDatei.moveTo(dIt.hasNext() ? dIt.next() : mo.createFolder('Duplikate'));
+      } catch (e) { /* liegen lassen */ }
+      hinweis = ' (Scan steckt im Blatt, Original nach Duplikate verschoben)';
+    } else if (!belegBild) {
+      hinweis = ' (PDF-Beleg bleibt eigene Datei, Verweis gesetzt)';
+    }
+  }
+  notifySlack(':fork_and_knife: *Bewirtungsbeleg erstellt:* ' + name + hinweis);
   return name;
 }
 
