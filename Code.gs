@@ -822,6 +822,7 @@ function processInvoices(queryOverride, ignoreProcessed) {
       // application/octet-stream → Dateiname .pdf zählt genauso.
       let pdfs = message.getAttachments({ includeInlineImages: false })
         .filter(a => a.getContentType() === 'application/pdf' || /\.pdf$/i.test(a.getName()));
+      const echterAnhang = pdfs.length > 0;
       if (pdfs.length === 0) {
         // Quittung ohne PDF-Anhang: erst nach einem verlinkten PDF greifen,
         // sonst den Mailtext selbst als PDF ablegen – die Buchhaltung braucht
@@ -831,7 +832,7 @@ function processInvoices(queryOverride, ignoreProcessed) {
         pdfs = [synth];
       }
 
-      const result = classifyMessage(message, pdfs[0]);
+      const result = classifyMessage(message, pdfs[0], echterAnhang);
 
       if (result.typ === 'keine_rechnung') {
         processedIds.add(msgId);
@@ -902,7 +903,7 @@ function processInvoices(queryOverride, ignoreProcessed) {
 // Klassifizierung: Stufe 1 Absenderlisten, Stufe 2 Claude (falls API-Key)
 // Rückgabe: { typ: 'offen'|'beleg'|'unklar'|'keine_rechnung', anbieter, betrag, waehrung, rechnungsdatum, faelligkeit }
 // ---------------------------------------------------------------------------
-function classifyMessage(message, pdf) {
+function classifyMessage(message, pdf, echterAnhang) {
   const domain = senderDomain(message);
   const haystack = ((message.getSubject() || '') + ' ' + pdf.getName() + ' ' +
     message.getPlainBody().slice(0, 2000)).toLowerCase();
@@ -913,7 +914,11 @@ function classifyMessage(message, pdf) {
   if (CONFIG.DIENSTLEISTER_DOMAINS.some(d => domain.endsWith(d))) {
     typ = 'offen';
   } else if (CONFIG.BELEG_DOMAINS.some(d => domain.endsWith(d))) {
-    if (!hasKeyword) return { typ: 'keine_rechnung' };
+    // Hängt eine echte PDF-Rechnung dran, ist der Betreff egal: Adobe schreibt
+    // „Steuerfreie Transaktion", Seat24 „Ihre Reise ist bestätigt", Musicbed
+    // „Your Receipt is Ready" – kein Belegwort, aber die Rechnung liegt bei.
+    // Solche Mails galten bisher als „keine Rechnung" und waren dauerhaft weg.
+    if (!hasKeyword && !echterAnhang) return { typ: 'keine_rechnung' };
     typ = 'beleg';
   }
 
@@ -1607,9 +1612,14 @@ function driveHasDoc_(entries, amountAbs, dateMs, label, kontoTag) {
     if (e.used) return;
     const dd = Math.abs(e.time - dateMs);
     const tokenOk = vendorMatch_(e.vendor, token);
-    // Enges Fenster für reine Betrags-Treffer; mit Anbieter-Match großzügig –
-    // Lastschriften laufen oft Wochen nach dem Rechnungsdatum (z. B. Fitness-Abos)
-    if (dd > (tokenOk ? 35 : 10) * 86400000) return;
+    // Fenster ASYMMETRISCH und eng genug, dass ein Beleg aus dem Vormonat
+    // niemals die Buchung des Folgemonats deckt: Bei Monatsabos (LinkedIn,
+    // Adobe, Higgsfield …) liegen die Rechnungen ~30 Tage auseinander – ein
+    // 35-Tage-Fenster hakte die neue Buchung mit dem alten Beleg ab und die
+    // Buchhaltung fand im Ordner nichts. Vorlauf deckt normale Zahlungsziele.
+    const vorlauf = dateMs - e.time;   // > 0: Beleg ist älter als die Buchung
+    if (vorlauf > (tokenOk ? 21 : 10) * 86400000) return;
+    if (vorlauf < -(tokenOk ? 10 : 5) * 86400000) return;
     let ok = false;
     if (e.cur === 'EUR') {
       ok = Math.abs(e.amount - amountAbs) < 0.005;
