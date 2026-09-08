@@ -789,6 +789,10 @@ function belegAusMailKoerper_(message) {
 }
 
 function processInvoices(queryOverride, ignoreProcessed) {
+  // Zwei gleichzeitige Laeufe haben schon Rechnungen doppelt abgelegt und
+  // doppelt an Qonto uebergeben: immer nur einer auf einmal.
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) { console.warn('processInvoices laeuft bereits'); return; }
   const labelDone = getOrCreateLabel(CONFIG.LABEL_DONE);
   const labelReview = getOrCreateLabel(CONFIG.LABEL_REVIEW);
   const processedIds = loadProcessedIds();
@@ -896,6 +900,7 @@ function processInvoices(queryOverride, ignoreProcessed) {
   } finally {
     storeProcessedIds(processedIds);
     storeSeenHashes(seenHashes);
+    lock.releaseLock();
   }
 }
 
