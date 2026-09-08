@@ -2248,6 +2248,10 @@ function sendeAnDatev(ym, testlauf) {
   ym = ym || Utilities.formatDate(new Date(Date.now() - 5 * 86400000), 'Europe/Berlin', 'yyyy-MM');
   const MAX_BYTES = 8 * 1024 * 1024;   // DATEV nimmt 10 MB je Mail, 8 als Puffer
   const MAX_DATEIEN = 20;
+  // Zwei parallele Laeufe (Trigger + Handstart) haben schon einmal alles
+  // doppelt an DATEV geschickt: erst sperren, dann senden.
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return 'DATEV-Versand laeuft bereits';
   const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
   const mo = monatsOrdner_(root, ym);
   const props = PropertiesService.getScriptProperties();
@@ -2298,6 +2302,7 @@ function sendeAnDatev(ym, testlauf) {
           '\n\nAutomatisch übermittelt vom Rechnungs-Agenten.',
           { attachments: p.map(f => f.getAs('application/pdf')) });
         p.forEach(f => gesendet.add(f.getId()));
+        props.setProperty('datevGesendet', JSON.stringify(Array.from(gesendet).slice(-3000)));
         neuGesendet += p.length;
       }
       bericht.push('• ' + ziel.label + ': ' + p.length + ' Belege' +
@@ -2315,9 +2320,7 @@ function sendeAnDatev(ym, testlauf) {
     lose.push(f.getName());
   }
 
-  if (!testlauf && neuGesendet) {
-    props.setProperty('datevGesendet', JSON.stringify(Array.from(gesendet).slice(-3000)));
-  }
+  lock.releaseLock();
   const text = ':outbox_tray: *DATEV-Versand ' + ym + (testlauf ? ' (Trockenlauf)' : '') + '*\n' +
     bericht.join('\n') +
     (lose.length ? '\n:warning: Noch keinem Konto zugeordnet, deshalb NICHT gesendet:\n• ' +
