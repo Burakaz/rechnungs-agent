@@ -2232,6 +2232,100 @@ function erstelleBewirtungsbeleg(o) {
   return name;
 }
 
+
+// ---------------------------------------------------------------------------
+// DATEV-Versand: schickt die Belege eines Monats an DATEV Unternehmen online.
+// Die Belege aus <YYYY-MM>/QONTO gehen an den Rechnungseingang, die aus
+// <YYYY-MM>/AMEX an die Kreditkarten-Adresse (getrennte Upload-Mails, damit
+// die Kanzlei sie den richtigen Konten zuordnet). Der Duplikate-Ordner bleibt
+// aussen vor, ebenso alles, was noch unsortiert im Monatsordner liegt: das
+// wird nur gemeldet. Jede Datei wird nur EINMAL gesendet (Property
+// datevGesendet), damit in DATEV keine Doppelbelege entstehen.
+// Aufruf im Editor: sendeAnDatev('2026-08')  bzw. sendeAnDatev('2026-08', true)
+// für einen Trockenlauf, der nur auflistet, was gehen würde.
+// ---------------------------------------------------------------------------
+function sendeAnDatev(ym, testlauf) {
+  ym = ym || Utilities.formatDate(new Date(Date.now() - 5 * 86400000), 'Europe/Berlin', 'yyyy-MM');
+  const MAX_BYTES = 8 * 1024 * 1024;   // DATEV nimmt 10 MB je Mail, 8 als Puffer
+  const MAX_DATEIEN = 20;
+  const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
+  const mo = monatsOrdner_(root, ym);
+  const props = PropertiesService.getScriptProperties();
+  const gesendet = new Set(JSON.parse(props.getProperty('datevGesendet') || '[]'));
+  const ziele = [
+    { sub: 'QONTO', mail: CONFIG.DATEV_MAIL_BANK, label: 'Rechnungseingang (Qonto)' },
+    { sub: 'AMEX', mail: CONFIG.DATEV_MAIL_KREDITKARTE, label: 'Kreditkarte (AMEX)' }
+  ];
+  const bericht = [];
+  let neuGesendet = 0;
+
+  ziele.forEach(ziel => {
+    if (!ziel.mail) { bericht.push('• ' + ziel.label + ': keine Zieladresse hinterlegt'); return; }
+    const it = mo.getFoldersByName(ziel.sub);
+    if (!it.hasNext()) { bericht.push('• ' + ziel.label + ': kein Ordner ' + ziel.sub); return; }
+    const ordner = it.next();
+
+    // Alle noch nicht gesendeten PDFs einsammeln, stabil nach Name sortiert
+    const dateien = [];
+    const fit = ordner.getFiles();
+    while (fit.hasNext()) {
+      const f = fit.next();
+      if (gesendet.has(f.getId())) continue;
+      if (String(f.getMimeType()) !== 'application/pdf') continue;
+      dateien.push(f);
+    }
+    dateien.sort((a, b) => a.getName() < b.getName() ? -1 : 1);
+    if (!dateien.length) { bericht.push('• ' + ziel.label + ': nichts Neues'); return; }
+
+    // In Pakete schneiden (Groesse + Anzahl) und je Paket eine Mail schicken
+    const pakete = [];
+    let paket = [], bytes = 0;
+    dateien.forEach(f => {
+      const gr = Number(f.getSize() || 0);
+      if (paket.length && (paket.length >= MAX_DATEIEN || bytes + gr > MAX_BYTES)) {
+        pakete.push(paket); paket = []; bytes = 0;
+      }
+      paket.push(f); bytes += gr;
+    });
+    if (paket.length) pakete.push(paket);
+
+    pakete.forEach((p, i) => {
+      const betreff = 'Belege ' + ym + ' ' + ziel.sub + (pakete.length > 1 ? ' (' + (i + 1) + '/' + pakete.length + ')' : '');
+      const namen = p.map(f => f.getName());
+      if (!testlauf) {
+        GmailApp.sendEmail(ziel.mail, betreff,
+          'Belege ' + ym + ' – ' + ziel.label + '\n\n' + namen.join('\n') +
+          '\n\nAutomatisch übermittelt vom Rechnungs-Agenten.',
+          { attachments: p.map(f => f.getAs('application/pdf')) });
+        p.forEach(f => gesendet.add(f.getId()));
+        neuGesendet += p.length;
+      }
+      bericht.push('• ' + ziel.label + ': ' + p.length + ' Belege' +
+        (testlauf ? ' (Trockenlauf)' : ' gesendet') + ' – ' + betreff);
+    });
+  });
+
+  // Unsortiertes im Monatsordner melden, aber nicht senden
+  const lose = [];
+  const rit = mo.getFiles();
+  while (rit.hasNext()) {
+    const f = rit.next();
+    if (String(f.getMimeType()) !== 'application/pdf') continue;
+    if (/kein-beleg/.test(String(f.getDescription() || ''))) continue;
+    lose.push(f.getName());
+  }
+
+  if (!testlauf && neuGesendet) {
+    props.setProperty('datevGesendet', JSON.stringify(Array.from(gesendet).slice(-3000)));
+  }
+  const text = ':outbox_tray: *DATEV-Versand ' + ym + (testlauf ? ' (Trockenlauf)' : '') + '*\n' +
+    bericht.join('\n') +
+    (lose.length ? '\n:warning: Noch keinem Konto zugeordnet, deshalb NICHT gesendet:\n• ' +
+      lose.join('\n• ') : '');
+  notifySlack(text);
+  return text;
+}
+
 // ---------------------------------------------------------------------------
 // Belege spiegeln, die jemand direkt an eine Qonto-Buchung gehängt hat: Die
 // Buchhaltung arbeitet mit dem Drive-Ordner, dort fehlten diese Nachweise
