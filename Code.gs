@@ -157,6 +157,12 @@ const CONFIG = {
 // Einmalig ausführen: legt Labels an und richtet den stündlichen Trigger ein
 // ---------------------------------------------------------------------------
 function setup() {
+  // setup gehoert nie an einen Zeit-Trigger: ein vergessener Minuten-Trigger
+  // hat im September jede Minute alle Trigger neu angelegt und den
+  // Rechnungslauf gestartet. Ein solcher Trigger raeumt sich hier selbst ab.
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'setup') ScriptApp.deleteTrigger(t);
+  });
   getOrCreateLabel(CONFIG.LABEL_DONE);
   getOrCreateLabel(CONFIG.LABEL_REVIEW);
   ScriptApp.getProjectTriggers().forEach(t => {
