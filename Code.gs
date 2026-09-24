@@ -147,6 +147,10 @@ const CONFIG = {
 
   LABEL_DONE: 'Rechnungen/abgelegt',
   LABEL_REVIEW: 'Rechnungen/pruefen',
+
+  // Eigene Absender: Mails von hier sind nie Eingangsbelege (Antworten,
+  // versendete Ausgangsrechnungen). Mitarbeiter-Adressen NICHT eintragen.
+  EIGENE_ADRESSEN: ['ich@example.com', 'billing@example.com'],
 };
 
 // ---------------------------------------------------------------------------
@@ -821,6 +825,10 @@ function processInvoices(queryOverride, ignoreProcessed) {
 
       const msgId = message.getId();
       if (!ignoreProcessed && processedIds.has(msgId)) continue;
+      // Eigene Mails (Antworten, versendete Ausgangsrechnungen) sind nie
+      // Eingangsbelege: RE1096 ging so im September elfmal als offene
+      // Rechnung an Qonto, weil jede Antwort im Thread das PDF mitschickte
+      if (istEigeneMail_(message)) { processedIds.add(msgId); continue; }
 
       // Manche Versender (z. B. flaschenpost via Mailjet) deklarieren PDFs als
       // application/octet-stream → Dateiname .pdf zählt genauso.
@@ -839,6 +847,7 @@ function processInvoices(queryOverride, ignoreProcessed) {
       const result = classifyMessage(message, pdfs[0], echterAnhang);
 
       if (result.typ === 'keine_rechnung') {
+        if (result.grund) thread.addLabel(getOrCreateLabel(CONFIG.LABEL_KEIN_BELEG || 'Rechnungen/kein Beleg'));
         processedIds.add(msgId);
         continue;
       }
@@ -865,8 +874,16 @@ function processInvoices(queryOverride, ignoreProcessed) {
         continue;
       }
 
-      // 2) Offene Rechnung: an Qonto weiterleiten
+      // 2) Offene Rechnung: nur weiterleiten, was wirklich noch zu überweisen
+      // ist (qontoSperrgrund_) – sonst steht in Qonto unter "Zu bezahlen",
+      // was per Lastschrift/Karte längst bezahlt oder gar keine Rechnung ist
+      let qontoGrund = null, qontoGesendet = false;
       if (result.typ === 'offen' && CONFIG.QONTO_FORWARD_ADDRESS && !queryOverride) {
+        qontoGrund = qontoSperrgrund_(result, echterAnhang);
+      }
+      if (result.typ === 'offen' && CONFIG.QONTO_FORWARD_ADDRESS && !queryOverride && !qontoGrund) {
+        qontoGesendet = true;
+        merkeQontoWeiterleitung_(result);
         GmailApp.sendEmail(
           CONFIG.QONTO_FORWARD_ADDRESS,
           message.getSubject() || 'Rechnung',
@@ -885,11 +902,13 @@ function processInvoices(queryOverride, ignoreProcessed) {
       } else {
         thread.addLabel(labelDone);
         if (result.typ === 'offen') {
-          notifySlack(':moneybag: Offene Rechnung: *' + (result.anbieter || senderDomain(message)) +
+          notifySlack((qontoGrund ? ':receipt: Rechnung: *' : ':moneybag: Offene Rechnung: *') +
+            (result.anbieter || senderDomain(message)) +
             '*' + (result.betrag ? ', ' + result.betrag + ' ' + (result.waehrung || 'EUR') : '') +
             (result.faelligkeit ? ', fällig ' + result.faelligkeit : '') +
-            (CONFIG.QONTO_FORWARD_ADDRESS && !queryOverride ? ' → an Qonto übergeben.' :
-              (queryOverride ? ' (Nachhol-Lauf – nicht an Qonto weitergeleitet)' : ' (Qonto-Weiterleitung ist deaktiviert!)')) +
+            (qontoGesendet ? ' → an Qonto übergeben.' :
+              (qontoGrund ? ' – nicht an Qonto, weil ' + qontoGrund + '.' :
+              (queryOverride ? ' (Nachhol-Lauf – nicht an Qonto weitergeleitet)' : ' (Qonto-Weiterleitung ist deaktiviert!)'))) +
             '\nAbgelegt als: ' + savedNames.join(', '));
         }
       }
@@ -933,6 +952,13 @@ function classifyMessage(message, pdf, echterAnhang) {
   let ai = null;
   if (CONFIG.ANTHROPIC_API_KEY) ai = classifyWithClaude(message, pdf);
 
+  // Harte KI-Urteile gelten auch für gelistete Absender: eigene Ausgangs-
+  // rechnungen, Lohn- und Personalunterlagen und reine Schreiben sind keine
+  // Eingangsbelege. Die Kanzlei-Domain stand pauschal auf "offen" und hat so
+  // Gehaltsabrechnungen und einen Aufhebungsvertrag an Qonto geschickt.
+  if (ai && ai.hart) return { typ: 'keine_rechnung', grund: ai.hart };
+  if (typ === 'offen' && ai && ai.typ === 'keine_rechnung') return { typ: 'keine_rechnung', grund: 'laut KI keine Rechnung' };
+
   if (!typ) {
     if (ai) typ = ai.typ;
     else typ = hasKeyword ? 'unklar' : 'keine_rechnung';
@@ -940,8 +966,14 @@ function classifyMessage(message, pdf, echterAnhang) {
   if (typ === 'keine_rechnung') return { typ: 'keine_rechnung' };
 
   const meta = (ai && ai.typ !== 'keine_rechnung') ? ai : {};
+  // Gelistete Dienstleister: per Lastschrift/Karte Bezahltes ist ein Beleg,
+  // und ohne KI-Urteil wird nichts blind an Qonto geschickt
+  if (typ === 'offen' && ai && ai.typ === 'beleg') typ = 'beleg';
+  if (typ === 'offen' && !ai) typ = 'unklar';
   return {
     typ: typ,
+    dokumentart: meta.dokumentart || null,
+    zahlungsweg: meta.zahlungsweg || null,
     anbieter: meta.anbieter || (typ === 'offen' ? domain : null),
     rechnungsnummer: meta.rechnungsnummer || null,
     betrag: meta.betrag || null,
@@ -965,6 +997,9 @@ function classifyWithClaude(message, pdf) {
     'Antworte NUR mit einem JSON-Objekt, ohne Markdown:\n' +
     '{"ist_rechnung": true|false,\n' +
     ' "status": "offen"|"bezahlt"|"unklar",  // "offen" = muss noch überwiesen werden (Zahlungsziel, IBAN, "zahlbar bis"); "bezahlt" = bereits per Lastschrift/Kreditkarte beglichen\n' +
+    ' "richtung": "eingang"|"ausgang",  // "ausgang" NUR wenn ADMKRS selbst der Rechnungssteller ist (eigene Ausgangsrechnung an einen Kunden, z. B. "Rechnung RE1096 von ADMKRS GmbH")\n' +
+    ' "dokumentart": "rechnung"|"quittung"|"mahnung"|"gutschrift"|"lohn_personal"|"schreiben"|"sonstiges",  // lohn_personal = Lohn-/Gehaltsabrechnung, Lohnjournal, Stundenzettel, SV-/Rentenversicherungs-Unterlagen, Arbeits- oder Aufhebungsvertrag; schreiben = Brief, Bescheid, Info- oder Rückfrage-Schreiben ohne Rechnungscharakter\n' +
+    ' "zahlungsweg": "ueberweisung"|"lastschrift"|"karte"|"paypal"|"bereits_bezahlt"|"unbekannt",  // "wird abgebucht"/SEPA-Lastschrift/Mandat → lastschrift; Kreditkarte/Visa/Amex/"charged to" → karte; "bezahlt"/"paid"/"Betrag erhalten" → bereits_bezahlt; IBAN + "bitte überweisen"/"zahlbar bis" → ueberweisung\n' +
     ' "anbieter": "der RECHNUNGSSTELLER/Aussteller/Lieferant — die Firma, die die Rechnung stellt und das Geld bekommt, NIEMALS der Empfänger/Kunde. Der Kunde ist fast immer ADMKRS (ADMKRS GmbH) — ADMKRS also NIE als anbieter. Kurz, ohne Rechtsform-Zusätze wie GmbH wenn möglich",\n' +
     ' "rechnungsnummer": "RE-2026-123 oder null",\n' +
     ' "betrag": "123.45", "waehrung": "EUR",\n' +
@@ -1002,8 +1037,15 @@ function classifyWithClaude(message, pdf) {
     const text = JSON.parse(resp.getContentText()).content[0].text;
     const data = JSON.parse(text.replace(/```json|```/g, '').trim());
     if (!data.ist_rechnung) return { typ: 'keine_rechnung' };
+    if (data.richtung === 'ausgang') return { typ: 'keine_rechnung', hart: 'eigene Ausgangsrechnung' };
+    if (data.dokumentart === 'lohn_personal') return { typ: 'keine_rechnung', hart: 'Lohn-/Personalunterlage' };
+    if (data.dokumentart === 'schreiben') return { typ: 'keine_rechnung', hart: 'Schreiben ohne Rechnungscharakter' };
+    const schonBezahlt = ['lastschrift', 'karte', 'paypal', 'bereits_bezahlt'].indexOf(data.zahlungsweg) !== -1;
     return {
-      typ: data.status === 'offen' ? 'offen' : (data.status === 'bezahlt' ? 'beleg' : 'unklar'),
+      typ: (data.status === 'offen' && !schonBezahlt) ? 'offen' :
+        ((data.status === 'bezahlt' || schonBezahlt) ? 'beleg' : 'unklar'),
+      dokumentart: data.dokumentart || null,
+      zahlungsweg: data.zahlungsweg || null,
       anbieter: data.anbieter || null,
       rechnungsnummer: data.rechnungsnummer || null,
       betrag: data.betrag || null,
@@ -1015,6 +1057,98 @@ function classifyWithClaude(message, pdf) {
     console.warn('Claude-Klassifizierung fehlgeschlagen: ' + e);
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Eigene Mails erkennen: Absender ist das Postfach selbst oder eine der
+// Firmen-Systemadressen (billing@, hi@). Mitarbeiter-Weiterleitungen
+// (erik@ …) zählen NICHT dazu, die bleiben normale Belege.
+// ---------------------------------------------------------------------------
+function istEigeneMail_(message) {
+  const m = String(message.getFrom() || '').toLowerCase().match(/[\w.+-]+@[\w.-]+/);
+  const adr = m ? m[0] : '';
+  if (!adr) return false;
+  // Bewusst ohne Session.getEffectiveUser(): das bräuchte einen neuen
+  // OAuth-Scope, und dann stehen alle Trigger bis zur Freigabe still
+  const eigene = (CONFIG.EIGENE_ADRESSEN || []).map(a => String(a).toLowerCase());
+  return eigene.indexOf(adr) !== -1;
+}
+
+// ---------------------------------------------------------------------------
+// Qonto-Weiterleitung absichern: nur was wirklich noch überwiesen werden muss,
+// landet in Qonto unter "Zu bezahlen". Im September kamen dort eigene
+// Ausgangsrechnungen, Lohnunterlagen der Kanzlei, Lastschrift-Abos und
+// dieselbe Mahnung viermal an. Gibt null zurück, wenn weitergeleitet werden
+// darf, sonst den Grund fürs Zurückhalten (steht dann in der Slack-Meldung).
+// ---------------------------------------------------------------------------
+function qontoSperrgrund_(r, echterAnhang) {
+  if (!echterAnhang) return 'kein PDF-Anhang';
+  if (!r.dokumentart) return 'die Dokumentart unklar ist';
+  if (r.dokumentart !== 'rechnung' && r.dokumentart !== 'mahnung') {
+    return 'es eine ' + r.dokumentart + ' ist, keine Rechnung';
+  }
+  if (['lastschrift', 'karte', 'paypal'].indexOf(r.zahlungsweg) !== -1) {
+    return 'sie per ' + r.zahlungsweg + ' beglichen wird';
+  }
+  if (r.zahlungsweg === 'bereits_bezahlt') return 'sie laut Dokument schon bezahlt ist';
+  const schon = new Set(JSON.parse(PropertiesService.getScriptProperties()
+    .getProperty('qontoWeitergeleitet') || '[]'));
+  if (qontoSchluessel_(r).some(k => schon.has(k))) return 'sie schon in Qonto liegt';
+  try {
+    const t = qontoZahlungGefunden_(r);
+    if (t) {
+      return 'sie am ' + Utilities.formatDate(new Date(t.settled_at || t.emitted_at),
+        'Europe/Berlin', 'dd.MM.') + ' schon bezahlt wurde (' + String(t.label || '').slice(0, 30) + ')';
+    }
+  } catch (e) { console.warn('Qonto-Zahlungsabgleich fehlgeschlagen: ' + e); }
+  return null;
+}
+
+// Schlüssel für "schon weitergeleitet": Anbieter + Rechnungsnummer (bei
+// Mahnungen zusätzlich ohne Suffix, RE0323_1 → RE0323) und Anbieter +
+// Betrag + Rechnungsdatum für Rechnungen ohne Nummer
+function qontoSchluessel_(r) {
+  const anb = String(r.anbieter || '').toLowerCase().replace(/[^a-z0-9äöü]+/g, '').slice(0, 20);
+  const nr = String(r.rechnungsnummer || '').toUpperCase().replace(/\s+/g, '');
+  const keys = [];
+  if (nr) {
+    keys.push(anb + '|' + nr);
+    const basis = nr.replace(/_\d{1,2}$/, '');
+    if (basis !== nr) keys.push(anb + '|' + basis);
+  }
+  if (r.betrag) keys.push(anb + '|' + Number(r.betrag).toFixed(2) + '|' + (r.rechnungsdatum || ''));
+  return keys;
+}
+
+function merkeQontoWeiterleitung_(r) {
+  const props = PropertiesService.getScriptProperties();
+  const liste = JSON.parse(props.getProperty('qontoWeitergeleitet') || '[]');
+  qontoSchluessel_(r).forEach(k => { if (liste.indexOf(k) === -1) liste.push(k); });
+  props.setProperty('qontoWeitergeleitet', JSON.stringify(liste.slice(-600)));
+}
+
+// Sucht auf den Qonto-Konten (ohne die aggregierten AMEX-Karten) eine
+// Abbuchung über denselben Betrag an denselben Empfänger ab Rechnungsdatum.
+// Bei Mahnungen 60 Tage davor, weil die Mahnung oft jünger ist als die Zahlung.
+function qontoZahlungGefunden_(r) {
+  if (!CONFIG.QONTO_API_SECRET || !r.betrag) return null;
+  if (r.waehrung && String(r.waehrung).toUpperCase() !== 'EUR') return null;
+  const betrag = Number(r.betrag);
+  const tok = vendorToken_(r.anbieter);
+  if (!betrag || !tok) return null;
+  const basis = /^\d{4}-\d{2}-\d{2}$/.test(String(r.rechnungsdatum || ''))
+    ? new Date(r.rechnungsdatum + 'T00:00:00Z') : new Date();
+  const von = new Date(basis.getTime() - (r.dokumentart === 'mahnung' ? 60 : 3) * 86400000);
+  const bis = new Date();
+  for (const acc of qontoAccounts_()) {
+    if (acc.is_external_account) continue;
+    for (const t of qontoTransactions_(acc.id, von.toISOString(), bis.toISOString(), 'settled_at')) {
+      if (t.side !== 'debit') continue;
+      if (Math.abs((t.amount || 0) - betrag) > 0.01) continue;
+      if (vendorMatch_(String(t.label || '').toLowerCase(), tok)) return t;
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
