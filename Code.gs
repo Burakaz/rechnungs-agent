@@ -799,6 +799,12 @@ function belegAusMailKoerper_(message) {
 }
 
 function processInvoices(queryOverride, ignoreProcessed) {
+  // Zeit-Trigger uebergeben ein Event-Objekt als ersten Parameter. Das ist
+  // keine Suchanfrage: vom 24. bis 28.09. suchte so jeder Stundenlauf nach
+  // "[object Object]" und legte nichts ab. Vorher hat das der vergessene
+  // Minuten-Trigger auf setup verdeckt, der processInvoices() ohne Parameter rief.
+  if (typeof queryOverride !== "string") queryOverride = undefined;
+  if (ignoreProcessed !== true) ignoreProcessed = false;
   // Zwei gleichzeitige Laeufe haben schon Rechnungen doppelt abgelegt und
   // doppelt an Qonto uebergeben: immer nur einer auf einmal.
   const lock = LockService.getScriptLock();
