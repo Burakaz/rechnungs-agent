@@ -1009,7 +1009,7 @@ function classifyWithClaude(message, pdf) {
     'Antworte NUR mit einem JSON-Objekt, ohne Markdown:\n' +
     '{"ist_rechnung": true|false,\n' +
     ' "status": "offen"|"bezahlt"|"unklar",  // "offen" = muss noch überwiesen werden (Zahlungsziel, IBAN, "zahlbar bis"); "bezahlt" = bereits per Lastschrift/Kreditkarte beglichen\n' +
-    ' "richtung": "eingang"|"ausgang",  // "ausgang" NUR wenn ADMKRS selbst der Rechnungssteller ist (eigene Ausgangsrechnung an einen Kunden, z. B. "Rechnung RE1096 von ADMKRS GmbH")\n' +
+    ' "richtung": "eingang"|"ausgang",  // "ausgang" NUR wenn ADMKRS selbst der Rechnungssteller ist (eigene Ausgangsrechnung an einen Kunden, z. B. "Rechnung RE1096 von ADMKRS GmbH"; Achtung: deutsche Stripe-Rechnungen nennen den AUSSTELLER unter der Überschrift "Rechnungsempfänger", maßgeblich ist, wer das Geld bekommt)\n' +
     ' "dokumentart": "rechnung"|"quittung"|"mahnung"|"gutschrift"|"lohn_personal"|"schreiben"|"sonstiges",  // lohn_personal = Lohn-/Gehaltsabrechnung, Lohnjournal, Stundenzettel, SV-/Rentenversicherungs-Unterlagen, Arbeits- oder Aufhebungsvertrag; schreiben = Brief, Bescheid, Info- oder Rückfrage-Schreiben ohne Rechnungscharakter\n' +
     ' "zahlungsweg": "ueberweisung"|"lastschrift"|"karte"|"paypal"|"bereits_bezahlt"|"unbekannt",  // "wird abgebucht"/SEPA-Lastschrift/Mandat → lastschrift; Kreditkarte/Visa/Amex/"charged to" → karte; "bezahlt"/"paid"/"Betrag erhalten" → bereits_bezahlt; IBAN + "bitte überweisen"/"zahlbar bis" → ueberweisung\n' +
     ' "anbieter": "der RECHNUNGSSTELLER/Aussteller/Lieferant — die Firma, die die Rechnung stellt und das Geld bekommt, NIEMALS der Empfänger/Kunde. Der Kunde ist fast immer ADMKRS (ADMKRS GmbH) — ADMKRS also NIE als anbieter. Kurz, ohne Rechtsform-Zusätze wie GmbH wenn möglich",\n' +
@@ -1049,7 +1049,12 @@ function classifyWithClaude(message, pdf) {
     const text = JSON.parse(resp.getContentText()).content[0].text;
     const data = JSON.parse(text.replace(/```json|```/g, '').trim());
     if (!data.ist_rechnung) return { typ: 'keine_rechnung' };
-    if (data.richtung === 'ausgang') return { typ: 'keine_rechnung', hart: 'eigene Ausgangsrechnung' };
+    // "ausgang" nur gelten lassen, wenn die Mail selbst auf eine ADMKRS-Rechnung
+    // zeigt: deutsche Stripe-Rechnungen fuehren den Aussteller unter der
+    // Ueberschrift "Rechnungsempfänger", so galt Helius am 26.09. als eigene Rechnung
+    const eigeneRe = /\bRE\s?\d{3,}\s*(von|\||-|–|:)?\s*ADMKRS\b|\bvon ADMKRS\b/i
+      .test((message.getSubject() || '') + ' ' + message.getPlainBody().slice(0, 3000));
+    if (data.richtung === 'ausgang' && eigeneRe) return { typ: 'keine_rechnung', hart: 'eigene Ausgangsrechnung' };
     if (data.dokumentart === 'lohn_personal') return { typ: 'keine_rechnung', hart: 'Lohn-/Personalunterlage' };
     if (data.dokumentart === 'schreiben') return { typ: 'keine_rechnung', hart: 'Schreiben ohne Rechnungscharakter' };
     const schonBezahlt = ['lastschrift', 'karte', 'paypal', 'bereits_bezahlt'].indexOf(data.zahlungsweg) !== -1;
