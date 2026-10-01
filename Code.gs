@@ -254,6 +254,7 @@ function checkMissingReceipts() {
     alleBankKonten_().forEach(acc => {
       if (acc.status === 'closed') return;
       const txs = kontoTransaktionen_(acc, from.toISOString(), now.toISOString());
+      const erstattet = erstatteteAbbuchungen_(txs);
       txs.forEach(t => {
         const betrag = (t.side === 'debit' ? -1 : 1) * (t.amount || 0);
         if (betrag >= 0 || t.operation_type === 'qonto_fee') return;
@@ -262,6 +263,7 @@ function checkMissingReceipts() {
         // Stichtag nach angezeigtem (Berliner) Datum – wie im BelegCheck-Sheet
         if (Utilities.formatDate(datum, 'Europe/Berlin', 'yyyy-MM-dd') < floorStr) return;
         const key = t.transaction_id || t.id;
+        if (erstattet.has(key)) { delete reminders[key]; return; }
         if (t.attachment_ids && t.attachment_ids.length > 0) { delete reminders[key]; return; }
         if (driveHasDoc_(driveMap, Math.abs(betrag), datum.getTime(), t.label, kontoTag_(acc))) {
           delete reminders[key];
@@ -698,6 +700,49 @@ function kontoTransaktionen_(acc, fromIso, toIso) {
 function istDauerbeleg_(t) {
   const s = ((t.label || '') + ' ' + (t.reference || '')).toLowerCase();
   return CONFIG.DAUERBELEG_MUSTER.some(m => s.indexOf(m) !== -1);
+}
+
+// Stornierte Käufe brauchen keinen Eingangsbeleg, es gibt schlicht keine
+// Rechnung (Anlass: Testbestellungen in einem Kunden-Shop, alle storniert und
+// erstattet). Paart je Konto jede Abbuchung mit einer Gutschrift desselben
+// Händlers über denselben Betrag, die bis zu 45 Tage danach kommt. Bleibt bei
+// einem Händler danach ein Rest, gilt er als ausgeglichen, wenn die Summen
+// exakt aufgehen (eine Erstattung für mehrere Bestellungen). Was nicht
+// aufgeht, bleibt offen und taucht weiter im Beleg-Check auf.
+// Liefert die IDs der ausgeglichenen Abbuchungen.
+function erstatteteAbbuchungen_(txs) {
+  const zeit = t => new Date(t.settled_at || t.emitted_at).getTime();
+  const id = t => t.transaction_id || t.id;
+  const debits = txs.filter(t => t.side === 'debit' && vendorToken_(t.label))
+    .sort((a, b) => zeit(a) - zeit(b));
+  // Auch die Erstattungen aufsteigend: Jede Abbuchung nimmt die früheste
+  // passende danach. Die API liefert neueste zuerst, sonst schnappt sich eine
+  // alte Bestellung die Erstattung einer späteren
+  const credits = txs.filter(t => t.side === 'credit' && vendorToken_(t.label))
+    .sort((a, b) => zeit(a) - zeit(b));
+  const gedeckt = new Set(), verbraucht = new Set();
+  debits.forEach(d => {
+    const tok = vendorToken_(d.label);
+    const c = credits.find(c => !verbraucht.has(id(c)) && vendorToken_(c.label) === tok &&
+      Math.abs(c.amount - d.amount) < 0.005 &&
+      zeit(c) >= zeit(d) - 86400000 && zeit(c) - zeit(d) <= 45 * 86400000);
+    if (c) { verbraucht.add(id(c)); gedeckt.add(id(d)); }
+  });
+  const rest = {};
+  debits.filter(d => !gedeckt.has(id(d))).forEach(d => {
+    const tok = vendorToken_(d.label);
+    (rest[tok] = rest[tok] || { d: [], c: [] }).d.push(d);
+  });
+  credits.filter(c => !verbraucht.has(id(c))).forEach(c => {
+    const r = rest[vendorToken_(c.label)];
+    if (r && zeit(c) >= zeit(r.d[0]) - 86400000) r.c.push(c);
+  });
+  Object.keys(rest).forEach(tok => {
+    const r = rest[tok];
+    const summe = arr => arr.reduce((s, t) => s + (t.amount || 0), 0);
+    if (r.c.length && Math.abs(summe(r.d) - summe(r.c)) < 0.005) r.d.forEach(d => gedeckt.add(id(d)));
+  });
+  return gedeckt;
 }
 
 // Händlerbasierte Belegpflicht: liefert die zuständige Person ({name,slack})
@@ -1364,7 +1409,11 @@ function berechneBelegRows_(monthStart) {
   // angezeigten (Berliner) Monat filtern, sonst rutschen Monatswechsel-
   // Buchungen in den falschen Tab
   const fromIso = new Date(monthStart.getTime() - 5 * 86400000).toISOString();
-  const toIso = new Date(monthEnd.getTime() + 86400000).toISOString();
+  // Bis 45 Tage über das Monatsende hinaus abfragen, damit eine Storno-
+  // Erstattung aus dem Folgemonat die Abbuchung noch ausgleicht; die Zeilen
+  // filtert der Monatsvergleich unten trotzdem auf den Zielmonat
+  const toIso = new Date(Math.max(monthEnd.getTime() + 86400000,
+    Math.min(Date.now(), monthEnd.getTime() + 45 * 86400000))).toISOString();
   const zielYm = Utilities.formatDate(monthStart, 'Europe/Berlin', 'yyyy-MM');
   const m = monthStart.getMonth(), y = monthStart.getFullYear();
   const qontoTabName = MONATE[m] + ' ' + y;
@@ -1382,6 +1431,7 @@ function berechneBelegRows_(monthStart) {
     if (acc.status === 'closed') return;
     // Externe Konten haben kein settled_at → nach emitted_at filtern
     const txs = kontoTransaktionen_(acc, fromIso, toIso);
+    const erstattet = erstatteteAbbuchungen_(txs);
     const kartenName = (acc.name || 'AMEX') +
       (acc.is_external_account && acc.account_number ? ' …' + String(acc.account_number).slice(-5) : '');
     txs.forEach(t => {
@@ -1393,7 +1443,7 @@ function berechneBelegRows_(monthStart) {
       if (acc.is_external_account) {
         const hasDoc = betrag >= 0 ||
           (t.attachment_ids && t.attachment_ids.length > 0) ||
-          istDauerbeleg_(t) ||
+          istDauerbeleg_(t) || erstattet.has(t.transaction_id || t.id) ||
           gmiHasDoc_(gmiMap, Math.abs(betrag), new Date(datum).getTime()) ||
           driveHasDoc_(driveMap, Math.abs(betrag), new Date(datum).getTime(), t.label, kontoTag_(acc));
         amexRows.push([0, hasDoc, datumStr, t.label || '', t.reference || '',
@@ -1401,7 +1451,7 @@ function berechneBelegRows_(monthStart) {
       } else {
         const hasDoc = (t.attachment_ids && t.attachment_ids.length > 0) ||
           betrag >= 0 || t.operation_type === 'qonto_fee' ||
-          istDauerbeleg_(t) ||
+          istDauerbeleg_(t) || erstattet.has(t.transaction_id || t.id) ||
           driveHasDoc_(driveMap, Math.abs(betrag), new Date(datum).getTime(), t.label, kontoTag_(acc));
         qontoRows.push([0, hasDoc, datumStr,
           Utilities.formatDate(new Date(t.emitted_at || datum), 'Europe/Berlin', 'dd.MM.yyyy'),
