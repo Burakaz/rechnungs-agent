@@ -230,7 +230,12 @@ function checkMissingReceipts() {
     // API-Fenster mit 2 Tagen Puffer – AMEX-Autorisierung (emitted_at) liegt
     // bis zu 2 Tage vor der Wertstellung; entschieden wird unten nach dem
     // angezeigten Berlin-Datum, daher rutschen keine Alt-Positionen rein
-    const from = new Date(Math.max(now.getTime() - 35 * 86400000,
+    // Mindestens 35 Tage, aber immer ab dem 1. des Vormonats: Sonst fallen
+    // offene Posten mitten im Monatsabschluss still aus der Liste, obwohl der
+    // Beleg weiter fehlt (Helius vom 01.09. war am 05.10. einfach weg)
+    const fensterStart = Math.min(now.getTime() - 35 * 86400000,
+      new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime());
+    const from = new Date(Math.max(fensterStart,
       new Date(floorStr).getTime() - 2 * 86400000));
     // Zuerst die AMEX-Verbindung prüfen – ohne sie veralten alle AMEX-Daten still
     try { pruefeAmexVerbindung_(); } catch (e) { /* nie blockieren */ }
@@ -251,30 +256,41 @@ function checkMissingReceipts() {
     const reminders = JSON.parse(props.getProperty('belegReminders') || '{}');
     const missing = [], mentions = [], offen = [];
 
+    // Vorlauf: Auch die Buchungen der 25 Tage VOR dem Berichtsfenster werden
+    // abgeglichen, und zwar alle Konten zusammen in zeitlicher Reihenfolge.
+    // Sonst wird der Beleg einer älteren Buchung frei, sobald sie aus dem
+    // Fenster fällt, und deckt fälschlich eine spätere über denselben Betrag
+    // (die Adobe-Rechnung vom 30.08. galt so als Beleg für den 15.09.).
+    const vorlauf = new Date(from.getTime() - 25 * 86400000);
+    const alle = [];
     alleBankKonten_().forEach(acc => {
       if (acc.status === 'closed') return;
-      const txs = kontoTransaktionen_(acc, from.toISOString(), now.toISOString());
+      const txs = kontoTransaktionen_(acc, vorlauf.toISOString(), now.toISOString());
       const erstattet = erstatteteAbbuchungen_(txs);
-      txs.forEach(t => {
-        const betrag = (t.side === 'debit' ? -1 : 1) * (t.amount || 0);
-        if (betrag >= 0 || t.operation_type === 'qonto_fee') return;
-        if (istDauerbeleg_(t)) return;
-        const datum = new Date(t.settled_at || t.emitted_at);
-        // Stichtag nach angezeigtem (Berliner) Datum – wie im BelegCheck-Sheet
-        if (Utilities.formatDate(datum, 'Europe/Berlin', 'yyyy-MM-dd') < floorStr) return;
-        const key = t.transaction_id || t.id;
-        if (erstattet.has(key)) { delete reminders[key]; return; }
-        if (t.attachment_ids && t.attachment_ids.length > 0) { delete reminders[key]; return; }
-        if (driveHasDoc_(driveMap, Math.abs(betrag), datum.getTime(), t.label, kontoTag_(acc))) {
-          delete reminders[key];
-          return;
-        }
-        offen.push({ betrag: Math.abs(betrag), datum: datum, label: t.label, key: key, acc: acc });
-      });
+      txs.forEach(t => alle.push({ t: t, acc: acc, erstattet: erstattet,
+        datum: new Date(t.settled_at || t.emitted_at) }));
+    });
+    alle.sort((a, b) => a.datum.getTime() - b.datum.getTime());
+    alle.forEach(x => {
+      const t = x.t, acc = x.acc, datum = x.datum;
+      const betrag = (t.side === 'debit' ? -1 : 1) * (t.amount || 0);
+      if (betrag >= 0 || t.operation_type === 'qonto_fee') return;
+      if (istDauerbeleg_(t)) return;
+      const key = t.transaction_id || t.id;
+      if (x.erstattet.has(key)) { delete reminders[key]; return; }
+      // Auch bei einem Qonto-Anhang die Drive-Kopie verbrauchen, sonst deckt
+      // sie eine andere Buchung über denselben Betrag
+      const imDrive = driveHasDoc_(driveMap, Math.abs(betrag), datum.getTime(), t.label, kontoTag_(acc));
+      if (imDrive || (t.attachment_ids && t.attachment_ids.length > 0)) { delete reminders[key]; return; }
+      // Gemeldet wird nur das Berichtsfenster; Stichtag nach angezeigtem
+      // (Berliner) Datum, wie im BelegCheck-Sheet
+      if (datum.getTime() < from.getTime()) return;
+      if (Utilities.formatDate(datum, 'Europe/Berlin', 'yyyy-MM-dd') < floorStr) return;
+      offen.push({ betrag: Math.abs(betrag), datum: datum, label: t.label, key: key, acc: acc });
     });
 
     // Sammelbelege: EIN Beleg deckt mehrere Abbuchungen desselben Anbieters
-    // (z. B. eine ÖPNV-Sammelrechnung über zwei Einzelfahrten).
+    // (z. B. Transdev/LogPay-Sammelrechnung 16,23 € = 6,23 € + 10,00 €).
     // Offene Posten nach Anbieter-Token gruppieren und gegen unverbrauchte
     // Drive-Einträge mit passender Betrags-SUMME matchen.
     const gruppen = {};
@@ -346,14 +362,23 @@ function checkMissingReceipts() {
 
     if (missing.length === 0) return;
     let text = ':receipt: *' + missing.length + ' Abbuchung' + (missing.length === 1 ? '' : 'en') +
-      ' ohne Beleg* (Qonto + AMEX, letzte 35 Tage):\n' +
-      missing.slice(0, 25).map(z => '• ' + z).join('\n') +
-      (missing.length > 25 ? '\n… und ' + (missing.length - 25) + ' weitere' : '');
+      ' ohne Beleg* (Qonto + AMEX, seit ' + Utilities.formatDate(from, 'Europe/Berlin', 'dd.MM.') + '):\n' +
+      missing.slice(0, 40).map(z => '• ' + z).join('\n') +
+      (missing.length > 40 ? '\n… und ' + (missing.length - 40) + ' weitere' : '');
+    // Hochgeladen, aber noch ohne Standardnamen: Solche Dateien sieht der
+    // Abgleich nicht, der zugehörige Posten steht dann zu Unrecht oben
+    const unbenannt = driveMap.unbenannt || [];
+    if (unbenannt.length) {
+      text += '\n\n:hourglass_flowing_sand: *' + unbenannt.length + ' Datei' + (unbenannt.length === 1 ? '' : 'en') +
+        ' im Ordner noch unbenannt* und deshalb oben noch nicht berücksichtigt:\n' +
+        unbenannt.slice(0, 8).map(z => '• ' + z).join('\n') +
+        (unbenannt.length > 8 ? '\n… und ' + (unbenannt.length - 8) + ' weitere' : '');
+    }
     if (mentions.length) {
       text += '\n\n:point_right: *Bitte Beleg nachreichen* – ' +
         (CONFIG.SLACK_BOT_TOKEN ? 'einfach hier in den Channel werfen (Foto reicht), ' : '') +
         'PDF in den <https://drive.google.com/drive/folders/' + CONFIG.DRIVE_FOLDER_ID +
-        '|Rechnungs-Ordner> legen oder an belege@deine-firma.de mailen:\n' +
+        '|Rechnungs-Ordner> legen oder an billing@example.com mailen:\n' +
         mentions.map(z => '• ' + z).join('\n');
     }
     notifySlack(text);
@@ -1408,7 +1433,9 @@ function berechneBelegRows_(monthStart) {
   // aber die Wertstellung – deshalb breiter abfragen und unten strikt nach dem
   // angezeigten (Berliner) Monat filtern, sonst rutschen Monatswechsel-
   // Buchungen in den falschen Tab
-  const fromIso = new Date(monthStart.getTime() - 5 * 86400000).toISOString();
+  // 25 Tage Vorlauf: Ältere Buchungen verbrauchen zuerst ihre eigenen Belege,
+  // sonst deckt die Rechnung des Vormonats eine Abbuchung dieses Monats
+  const fromIso = new Date(monthStart.getTime() - 25 * 86400000).toISOString();
   // Bis 45 Tage über das Monatsende hinaus abfragen, damit eine Storno-
   // Erstattung aus dem Folgemonat die Abbuchung noch ausgleicht; die Zeilen
   // filtert der Monatsvergleich unten trotzdem auf den Zielmonat
@@ -1427,6 +1454,7 @@ function berechneBelegRows_(monthStart) {
   const driveMap = driveDocMap_(monthStart);
   const qontoRows = [], amexRows = [];
 
+  const alle = [];
   accounts.forEach(acc => {
     if (acc.status === 'closed') return;
     // Externe Konten haben kein settled_at → nach emitted_at filtern
@@ -1435,31 +1463,42 @@ function berechneBelegRows_(monthStart) {
     const kartenName = (acc.name || 'AMEX') +
       (acc.is_external_account && acc.account_number ? ' …' + String(acc.account_number).slice(-5) : '');
     txs.forEach(t => {
-      const betrag = (t.side === 'debit' ? -1 : 1) * (t.amount || 0);
       const datum = t.settled_at || t.emitted_at;
-      const datumStr = datum ? Utilities.formatDate(new Date(datum), 'Europe/Berlin', 'dd.MM.yyyy') : '';
-      // Nur Buchungen, deren Wertstellung im Zielmonat liegt
-      if (!datum || Utilities.formatDate(new Date(datum), 'Europe/Berlin', 'yyyy-MM') !== zielYm) return;
-      if (acc.is_external_account) {
-        const hasDoc = betrag >= 0 ||
-          (t.attachment_ids && t.attachment_ids.length > 0) ||
-          istDauerbeleg_(t) || erstattet.has(t.transaction_id || t.id) ||
-          gmiHasDoc_(gmiMap, Math.abs(betrag), new Date(datum).getTime()) ||
-          driveHasDoc_(driveMap, Math.abs(betrag), new Date(datum).getTime(), t.label, kontoTag_(acc));
-        amexRows.push([0, hasDoc, datumStr, t.label || '', t.reference || '',
-          betrag, t.currency || 'EUR', kartenName]);
-      } else {
-        const hasDoc = (t.attachment_ids && t.attachment_ids.length > 0) ||
-          betrag >= 0 || t.operation_type === 'qonto_fee' ||
-          istDauerbeleg_(t) || erstattet.has(t.transaction_id || t.id) ||
-          driveHasDoc_(driveMap, Math.abs(betrag), new Date(datum).getTime(), t.label, kontoTag_(acc));
-        qontoRows.push([0, hasDoc, datumStr,
-          Utilities.formatDate(new Date(t.emitted_at || datum), 'Europe/Berlin', 'dd.MM.yyyy'),
-          t.label || '', t.operation_type || '', t.reference || '',
-          betrag, t.currency || 'EUR', acc.name || '',
-          t.attachment_ids ? t.attachment_ids.length : 0]);
-      }
+      if (datum) alle.push({ t: t, acc: acc, erstattet: erstattet, kartenName: kartenName,
+        datum: datum, zeit: new Date(datum).getTime() });
     });
+  });
+  // Alle Konten zusammen in zeitlicher Reihenfolge abgleichen (siehe Beleg-Check)
+  alle.sort((a, b) => a.zeit - b.zeit);
+  alle.forEach(x => {
+    const t = x.t, acc = x.acc, datum = x.datum;
+    const betrag = (t.side === 'debit' ? -1 : 1) * (t.amount || 0);
+    const storno = x.erstattet.has(t.transaction_id || t.id);
+    const dauer = istDauerbeleg_(t);
+    // Den Drive-Beleg immer verbrauchen, auch wenn schon ein Anhang oder
+    // GMI-Treffer vorliegt, sonst deckt er eine andere Buchung gleichen Betrags
+    const imDrive = betrag < 0 && !storno && !dauer && t.operation_type !== 'qonto_fee' &&
+      driveHasDoc_(driveMap, Math.abs(betrag), x.zeit, t.label, kontoTag_(acc));
+    // Nur Buchungen, deren Wertstellung im Zielmonat liegt
+    if (Utilities.formatDate(new Date(datum), 'Europe/Berlin', 'yyyy-MM') !== zielYm) return;
+    const datumStr = Utilities.formatDate(new Date(datum), 'Europe/Berlin', 'dd.MM.yyyy');
+    if (acc.is_external_account) {
+      const hasDoc = betrag >= 0 ||
+        (t.attachment_ids && t.attachment_ids.length > 0) ||
+        dauer || storno || imDrive ||
+        gmiHasDoc_(gmiMap, Math.abs(betrag), x.zeit);
+      amexRows.push([0, hasDoc, datumStr, t.label || '', t.reference || '',
+        betrag, t.currency || 'EUR', x.kartenName]);
+    } else {
+      const hasDoc = (t.attachment_ids && t.attachment_ids.length > 0) ||
+        betrag >= 0 || t.operation_type === 'qonto_fee' ||
+        dauer || storno || imDrive;
+      qontoRows.push([0, hasDoc, datumStr,
+        Utilities.formatDate(new Date(t.emitted_at || datum), 'Europe/Berlin', 'dd.MM.yyyy'),
+        t.label || '', t.operation_type || '', t.reference || '',
+        betrag, t.currency || 'EUR', acc.name || '',
+        t.attachment_ids ? t.attachment_ids.length : 0]);
+    }
   });
 
   const sortByDate = (a, b) => a[2].split('.').reverse().join('') < b[2].split('.').reverse().join('') ? -1 : 1;
@@ -1745,6 +1784,7 @@ function gmiHasDoc_(map, amountAbs, dateMs) {
 // ---------------------------------------------------------------------------
 function driveDocMap_(monthStart, exactOnly) {
   const entries = [];
+  entries.unbenannt = [];
   const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
   // Ohne exactOnly zwei Monate zurückschauen: das 35-Tage-Fenster des
   // Beleg-Checks überspannt am Monatsanfang bis zu zwei Monatsordner,
@@ -1759,17 +1799,34 @@ function driveDocMap_(monthStart, exactOnly) {
     if (!mIt.hasNext()) return;
     const monthFolder = mIt.next();
     // Monatsordner-Root plus die Konto-Unterordner AMEX/QONTO scannen
-    const scanFolders = [monthFolder];
+    const scanFolders = [{ f: monthFolder, tief: false }];
     ['AMEX', 'QONTO'].forEach(sub => {
       const it = monthFolder.getFoldersByName(sub);
-      if (it.hasNext()) scanFolders.push(it.next());
+      if (!it.hasNext()) return;
+      const s = it.next();
+      scanFolders.push({ f: s, tief: false });
+      // Von Hand angelegte Unterordner (z. B. "Nachreichen") zählen beim
+      // Abgleich mit, sonst gilt ein dort abgelegter Beleg weiter als fehlend.
+      // Umbenannt oder verschoben wird darin nichts.
+      const un = s.getFolders();
+      while (un.hasNext()) scanFolders.push({ f: un.next(), tief: true });
     });
-    scanFolders.forEach(sf => {
+    scanFolders.forEach(scan => {
+      const sf = scan.f;
       const files = sf.getFiles();
       while (files.hasNext()) {
         const f = files.next();
-        const m = f.getName().match(/^(\d{4}-\d{2}-\d{2})_(.+?)_(\d+(?:\.\d+)?)([A-Za-z]{3})(?:_\d+Belege)?(?:_\d+)?(?:_(?:Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*)?\.pdf$/i);
-        if (!m) continue;
+        const m = f.getName().match(/^(\d{4}-\d{2}-\d{2})_(.+?)_(\d+(?:\.\d+)?)([A-Za-z]{3})(?:_\d+Belege)?(?:_\d+)?(?:_((?:Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*))?\.pdf$/i);
+        if (!m) {
+          // Frisch hochgeladen und noch nicht benannt: für den Abgleich
+          // unsichtbar, deshalb im Beleg-Check eigens ausweisen
+          try {
+            if (/\.pdf$/i.test(f.getName()) && Date.now() - f.getDateCreated().getTime() < 10 * 86400000) {
+              entries.unbenannt.push(ym.slice(5) + ': ' + f.getName());
+            }
+          } catch (e) { /* reine Zusatzinfo */ }
+          continue;
+        }
         // Sammelscan: die Einzelbeträge stehen in der Beschreibung
         let teile = [];
         try {
@@ -1778,6 +1835,7 @@ function driveDocMap_(monthStart, exactOnly) {
         } catch (e) { /* ohne Einzelbeträge zählt nur die Summe */ }
         entries.push({ time: new Date(m[1]).getTime(), vendor: m[2].toLowerCase(),
           amount: parseFloat(m[3]), cur: m[4].toUpperCase(), used: false, teile: teile,
+          tag: (m[5] || '').toLowerCase(), tief: scan.tief,
           file: f, monthFolder: monthFolder, inSub: sf.getId() !== monthFolder.getId() });
       }
     });
@@ -1804,52 +1862,76 @@ function vendorToken_(label) {
 
 function vendorMatch_(vendor, token) {
   if (!token) return false;
-  return vendor.indexOf(token) !== -1 ||
-    (VENDOR_ALIAS[token] ? vendor.indexOf(VENDOR_ALIAS[token]) !== -1 : false);
+  // Trennzeichen im Dateinamen dürfen den Vergleich nicht brechen
+  // ("abacco-s-steakhouse" gegen "abaccos", "eleven-labs" gegen "elevenlabs").
+  // Kurze Tokens müssen dafür ein ganzes Wort treffen, sonst passt "mark"
+  // (PayPal-Label für aescripts) auf "penny-markt".
+  const v = String(vendor || '').toLowerCase();
+  const flach = v.replace(/[^a-zäöü]+/g, '');
+  const worte = v.split(/[^a-zäöü]+/).filter(Boolean);
+  const direkt = token.length <= 5
+    ? (worte.indexOf(token) !== -1 || flach.indexOf(token) === 0)
+    : flach.indexOf(token) !== -1;
+  return direkt || (VENDOR_ALIAS[token] ? v.indexOf(VENDOR_ALIAS[token]) !== -1 : false);
 }
 
 function driveHasDoc_(entries, amountAbs, dateMs, label, kontoTag) {
   const token = vendorToken_(label);
-  let best = null;
-  // Zwei Durchläufe: exakte Treffer haben Vorrang vor der Trinkgeld-Toleranz –
-  // sonst schnappt sich eine Nachbar-Buchung desselben Anbieters den falschen Beleg
-  [false, true].some(mitTrinkgeld => {
-  entries.forEach(e => {
-    if (e.used) return;
-    const dd = Math.abs(e.time - dateMs);
-    const tokenOk = vendorMatch_(e.vendor, token);
-    // Fenster ASYMMETRISCH und eng genug, dass ein Beleg aus dem Vormonat
-    // niemals die Buchung des Folgemonats deckt: Bei Monatsabos (LinkedIn,
-    // Adobe, Higgsfield …) liegen die Rechnungen ~30 Tage auseinander – ein
-    // 35-Tage-Fenster hakte die neue Buchung mit dem alten Beleg ab und die
-    // Buchhaltung fand im Ordner nichts. Vorlauf deckt normale Zahlungsziele.
+  // Fenster ASYMMETRISCH und eng genug, dass ein Beleg aus dem Vormonat
+  // niemals die Buchung des Folgemonats deckt: Bei Monatsabos (LinkedIn,
+  // Adobe, Higgsfield …) liegen die Rechnungen ~30 Tage auseinander – ein
+  // 35-Tage-Fenster hakte die neue Buchung mit dem alten Beleg ab und die
+  // Buchhaltung fand im Ordner nichts. Vorlauf deckt normale Zahlungsziele.
+  const imFenster = (e, tokenOk) => {
     const vorlauf = dateMs - e.time;   // > 0: Beleg ist älter als die Buchung
-    if (vorlauf > (tokenOk ? 21 : 10) * 86400000) return;
-    if (vorlauf < -(tokenOk ? 10 : 5) * 86400000) return;
-    let ok = false;
-    if (e.cur === 'EUR') {
-      ok = Math.abs(e.amount - amountAbs) < 0.005;
-      // Sammelscan (mehrere Quittungen auf einem Bild): Auch eine einzelne
-      // davon kann genau diese Buchung sein
-      if (!ok && e.teile && e.teile.length > 1) {
-        ok = e.teile.some(t => Math.abs(t - amountAbs) < 0.005);
-      }
-      // Trinkgeld-Fall (Bewirtung): die Kartenzahlung liegt bis zu 20 % über
-      // dem Bon-Betrag – nur mit Anbieter-Match zulassen
-      if (!ok && mitTrinkgeld && tokenOk && amountAbs > e.amount && amountAbs / e.amount <= 1.2) ok = true;
-    } else if (tokenOk) {
-      const ratio = amountAbs / e.amount;
-      ok = ratio > 0.7 && ratio < 1.3;
-    }
-    if (ok && (!best || dd < best.dd)) best = { dd: dd, e: e };
-  });
-  return !!best;
+    return vorlauf <= (tokenOk ? 21 : 10) * 86400000 && vorlauf >= -(tokenOk ? 10 : 5) * 86400000;
+  };
+  // Exakter EUR-Betrag; beim Sammelscan (mehrere Quittungen auf einem Bild)
+  // kann auch eine einzelne davon genau diese Buchung sein
+  const exakt = e => e.cur === 'EUR' && (Math.abs(e.amount - amountAbs) < 0.005 ||
+    (e.teile && e.teile.length > 1 && e.teile.some(t => Math.abs(t - amountAbs) < 0.005)));
+  // Ein Beleg, der schon einem ANDEREN Konto zugeordnet ist, deckt nur noch
+  // über Betrag UND Anbieter. Sonst hakte eine schwächere Stufe z. B. einen
+  // Supermarkt-Bon einer anderen Karte für eine PayPal-Buchung auf dieser Karte ab.
+  const fremd = e => !!(kontoTag && e.tag && e.tag !== String(kontoTag).toLowerCase());
+  const anbieterBelege = entries.filter(e => vendorMatch_(e.vendor, token) && imFenster(e, true)).length;
+  // Fünf Stufen, die stärkste zuerst. Früher lief die Toleranz für jeden
+  // Anbieter mit und schnappte sich den Beleg einer Nachbar-Buchung: Meta
+  // 803,57 € galt über die 803,21-€-Rechnung des Vormonats als belegt.
+  const stufen = [
+    // 1. gleicher Anbieter, exakter Betrag, nicht für ein anderes Konto markiert
+    e => vendorMatch_(e.vendor, token) && exakt(e) && !fremd(e),
+    // 2. gleicher Anbieter, Rechnung in Fremdwährung (Kurs plausibel). Bei USD
+    //    eng gefasst, sonst sind zwei Rechnungen desselben Tages vertauschbar
+    //    (Helius 999 $ und 800 $ gegen 878,96 € und 704,48 €)
+    e => e.cur !== 'EUR' && vendorMatch_(e.vendor, token) && !fremd(e) &&
+      amountAbs / e.amount > (e.cur === 'USD' ? 0.78 : 0.7) &&
+      amountAbs / e.amount < (e.cur === 'USD' ? 1.05 : 1.3),
+    // 3. gleicher Anbieter, exakter Betrag, aber fürs falsche Konto markiert
+    e => vendorMatch_(e.vendor, token) && exakt(e),
+    // 4. exakter Betrag ohne Anbieter-Treffer (Label ≠ Rechnungsname, z. B. PayPal)
+    e => exakt(e) && !fremd(e),
+    // 5. Trinkgeld (Bewirtung): Kartenzahlung bis 20 % über dem Bon. Nur wenn es
+    //    von diesem Anbieter im Fenster genau EINEN Beleg gibt, also nie bei
+    //    Abos oder Anzeigenkonten mit mehreren Rechnungen
+    e => e.cur === 'EUR' && anbieterBelege === 1 && vendorMatch_(e.vendor, token) && !fremd(e) &&
+      amountAbs > e.amount && amountAbs / e.amount <= 1.2,
+  ];
+  let best = null;
+  stufen.some(passt => {
+    entries.forEach(e => {
+      if (e.used) return;
+      if (!imFenster(e, vendorMatch_(e.vendor, token)) || !passt(e)) return;
+      const dd = Math.abs(e.time - dateMs);
+      if (!best || dd < best.dd) best = { dd: dd, e: e };
+    });
+    return !!best;
   });
   if (best) {
     best.e.used = true;
     // Zahlungskonto in den Dateinamen taggen und die Datei in den passenden
     // Konto-Unterordner (AMEX/ bzw. QONTO/) des Monatsordners einsortieren
-    if (kontoTag && best.e.file) {
+    if (kontoTag && best.e.file && !best.e.tief) {
       try {
         const nm = best.e.file.getName();
         if (!/_(Qonto|AMEX|Kasse|Bank)[A-Za-z0-9ÄÖÜäöüß-]*\.pdf$/i.test(nm)) {
@@ -1899,9 +1981,9 @@ function processDriveUploads() {
   const root = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
   const now = new Date();
 
-  // Kandidaten-Ordner: Root + aktueller & Vormonat (dort landen Uploads)
-  // Root + aktueller & Vormonat inkl. deren Konto-Unterordner (Scans landen oft
-  // direkt in AMEX/ oder QONTO/ – dort bleiben sie, bekommen aber sauberen Namen)
+  // Kandidaten-Ordner: Root + aktueller & Vormonat inkl. deren Konto-Unterordner
+  // (Scans werden oft direkt in AMEX/ oder QONTO/ abgelegt – dort bleiben sie
+  // liegen, bekommen aber trotzdem den sauberen Namen).
   const folders = [{ f: root, isRoot: true, inSub: false }];
   // Scan-Eingang (Dokumentenscanner) wie den Root behandeln: Dateien werden
   // benannt und in den richtigen Monatsordner verschoben
@@ -1920,7 +2002,13 @@ function processDriveUploads() {
     folders.push({ f: mf, isRoot: false, inSub: false });
     ['AMEX', 'QONTO', 'Sonstiges'].forEach(sub => {
       const it = mf.getFoldersByName(sub);
-      if (it.hasNext()) folders.push({ f: it.next(), isRoot: false, inSub: true });
+      if (!it.hasNext()) return;
+      const s = it.next();
+      folders.push({ f: s, isRoot: false, inSub: true });
+      // Von Hand angelegte Unterordner (z. B. "Nachreichen"): Dateien dort
+      // benennen, aber liegen lassen, sonst sieht der Abgleich sie nicht
+      const un = s.getFolders();
+      while (un.hasNext()) folders.push({ f: un.next(), isRoot: false, inSub: true });
     });
   });
 
